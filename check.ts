@@ -183,53 +183,57 @@ export async function main(configOverride?: TypegraphConfig): Promise<CheckResul
   }
 
   // 5. MCP registration
-  const mcpJsonPath = path.resolve(projectRoot, ".claude/mcp.json");
-  if (fs.existsSync(mcpJsonPath)) {
-    try {
-      const mcpJson = JSON.parse(fs.readFileSync(mcpJsonPath, "utf-8"));
-      const tsNav = mcpJson?.mcpServers?.["typegraph"];
-      if (tsNav) {
-        const hasCommand = tsNav.command === "npx";
-        const hasArgs = Array.isArray(tsNav.args) && tsNav.args.includes("tsx");
-        const hasEnv = tsNav.env?.["TYPEGRAPH_PROJECT_ROOT"] && tsNav.env?.["TYPEGRAPH_TSCONFIG"];
-        if (hasCommand && hasArgs && hasEnv) {
-          pass("MCP registered in .claude/mcp.json");
+  if (process.env.CLAUDE_PLUGIN_ROOT) {
+    pass("MCP registered via plugin (CLAUDE_PLUGIN_ROOT set)");
+  } else {
+    const mcpJsonPath = path.resolve(projectRoot, ".claude/mcp.json");
+    if (fs.existsSync(mcpJsonPath)) {
+      try {
+        const mcpJson = JSON.parse(fs.readFileSync(mcpJsonPath, "utf-8"));
+        const tsNav = mcpJson?.mcpServers?.["typegraph"];
+        if (tsNav) {
+          const hasCommand = tsNav.command === "npx";
+          const hasArgs = Array.isArray(tsNav.args) && tsNav.args.includes("tsx");
+          const hasEnv = tsNav.env?.["TYPEGRAPH_PROJECT_ROOT"] && tsNav.env?.["TYPEGRAPH_TSCONFIG"];
+          if (hasCommand && hasArgs && hasEnv) {
+            pass("MCP registered in .claude/mcp.json");
+          } else {
+            const issues: string[] = [];
+            if (!hasCommand) issues.push("command should be 'npx'");
+            if (!hasArgs) issues.push("args should include 'tsx'");
+            if (!hasEnv) issues.push("env should set TYPEGRAPH_PROJECT_ROOT and TYPEGRAPH_TSCONFIG");
+            fail(
+              `MCP registration incomplete: ${issues.join(", ")}`,
+              "See README for correct .claude/mcp.json format"
+            );
+          }
         } else {
-          const issues: string[] = [];
-          if (!hasCommand) issues.push("command should be 'npx'");
-          if (!hasArgs) issues.push("args should include 'tsx'");
-          if (!hasEnv) issues.push("env should set TYPEGRAPH_PROJECT_ROOT and TYPEGRAPH_TSCONFIG");
+          const serverPath = toolIsEmbedded
+            ? `./${toolRelPath}/server.ts`
+            : path.resolve(toolDir, "server.ts");
           fail(
-            `MCP registration incomplete: ${issues.join(", ")}`,
-            "See README for correct .claude/mcp.json format"
+            "MCP entry 'typegraph' not found in .claude/mcp.json",
+            `Add to .claude/mcp.json:\n` +
+              `    {\n` +
+              `      "mcpServers": {\n` +
+              `        "typegraph": {\n` +
+              `          "command": "npx",\n` +
+              `          "args": ["tsx", "${serverPath}"],\n` +
+              `          "env": { "TYPEGRAPH_PROJECT_ROOT": ".", "TYPEGRAPH_TSCONFIG": "./tsconfig.json" }\n` +
+              `        }\n` +
+              `      }\n` +
+              `    }`
           );
         }
-      } else {
-        const serverPath = toolIsEmbedded
-          ? `./${toolRelPath}/server.ts`
-          : path.resolve(toolDir, "server.ts");
+      } catch (err) {
         fail(
-          "MCP entry 'typegraph' not found in .claude/mcp.json",
-          `Add to .claude/mcp.json:\n` +
-            `    {\n` +
-            `      "mcpServers": {\n` +
-            `        "typegraph": {\n` +
-            `          "command": "npx",\n` +
-            `          "args": ["tsx", "${serverPath}"],\n` +
-            `          "env": { "TYPEGRAPH_PROJECT_ROOT": ".", "TYPEGRAPH_TSCONFIG": "./tsconfig.json" }\n` +
-            `        }\n` +
-            `      }\n` +
-            `    }`
+          "Failed to parse .claude/mcp.json",
+          `Check JSON syntax: ${err instanceof Error ? err.message : String(err)}`
         );
       }
-    } catch (err) {
-      fail(
-        "Failed to parse .claude/mcp.json",
-        `Check JSON syntax: ${err instanceof Error ? err.message : String(err)}`
-      );
+    } else {
+      fail(".claude/mcp.json not found", `Create .claude/mcp.json with typegraph server registration`);
     }
-  } else {
-    fail(".claude/mcp.json not found", `Create .claude/mcp.json with typegraph server registration`);
   }
 
   // 6. typegraph-mcp dependencies installed

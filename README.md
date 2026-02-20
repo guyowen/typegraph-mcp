@@ -43,7 +43,24 @@ Agent: ts_trace_chain({ file: "src/handlers.ts", symbol: "createUser" })
 
 ## Quick start
 
-### Option A: CLI setup (recommended)
+### Option A: Claude Code plugin (recommended)
+
+```bash
+# Clone and install
+git clone https://github.com/ojonesjr/typegraph-mcp.git ~/typegraph-mcp
+cd ~/typegraph-mcp && pnpm install
+
+# Load the plugin
+claude --plugin-dir ~/typegraph-mcp
+```
+
+The plugin auto-configures everything:
+- MCP server starts automatically with the correct environment
+- 5 workflow skills teach Claude *when* and *how* to chain tools (impact analysis, refactor safety, dependency audit, code exploration, tool selection)
+- `/typegraph:check` and `/typegraph:test` commands available in-session
+- SessionStart hook verifies dependencies are installed
+
+### Option B: CLI setup (for non-Claude Code agents)
 
 ```bash
 # Clone and install
@@ -62,7 +79,7 @@ The `setup` command does everything:
 
 Use `--yes` to skip confirmation prompts.
 
-### Option B: Manual setup
+### Option C: Manual setup
 
 If you prefer to configure things yourself:
 
@@ -266,6 +283,30 @@ AI Agent ─── stdin/stdout ─── MCP Server ─┬── tsserver (chil
                                                 oxc-parser + oxc-resolver
                                                 structural graph queries
 ```
+
+### Plugin structure (Claude Code)
+
+```
+typegraph-mcp/
+├── .claude-plugin/plugin.json   # Plugin manifest
+├── .mcp.json                    # Auto-configured MCP server
+├── hooks/hooks.json             # SessionStart dependency check
+├── scripts/ensure-deps.sh       # Installs node_modules if missing
+├── commands/
+│   ├── check.md                 # /typegraph:check
+│   └── test.md                  # /typegraph:test
+├── skills/
+│   ├── tool-selection/          # Which of the 14 tools to use when
+│   ├── impact-analysis/         # blast_radius + dependents + boundary
+│   ├── refactor-safety/         # trace_chain + cycles + references
+│   ├── dependency-audit/        # cycles + dependency_tree + boundary
+│   └── code-exploration/        # navigate_to + trace_chain + subgraph
+├── server.ts                    # MCP server entry point
+├── cli.ts                       # CLI (setup, check, test, start)
+└── ...
+```
+
+### Server internals
 
 Two subsystems start concurrently:
 
