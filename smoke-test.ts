@@ -2,8 +2,7 @@
 /**
  * ts-nav-mcp Smoke Test — Verifies all 14 tools work against the target project.
  *
- * Unlike test-tools.ts (saaskit-specific with hardcoded positions), this test
- * dynamically discovers files and symbols from whatever project it's pointed at.
+ * Dynamically discovers files and symbols from whatever project it's pointed at.
  *
  * Run from project root:
  *   npx tsx tools/ts-nav-mcp/smoke-test.ts
@@ -80,7 +79,15 @@ function findInNavBar(
   return null;
 }
 
-const SKIP_DIRS = new Set(["node_modules", "dist", "build", ".git", ".wrangler", "coverage", "out"]);
+const SKIP_DIRS = new Set([
+  "node_modules",
+  "dist",
+  "build",
+  ".git",
+  ".wrangler",
+  "coverage",
+  "out",
+]);
 
 /** Find a file with imports and exported symbols (good test candidate) */
 function findTestFile(rootDir: string): string | null {
@@ -100,7 +107,8 @@ function findTestFile(rootDir: string): string | null {
         walk(path.join(dir, entry.name), depth + 1);
       } else if (entry.isFile()) {
         const name = entry.name;
-        if (name.endsWith(".d.ts") || name.endsWith(".test.ts") || name.endsWith(".spec.ts")) continue;
+        if (name.endsWith(".d.ts") || name.endsWith(".test.ts") || name.endsWith(".spec.ts"))
+          continue;
         if (!name.endsWith(".ts") && !name.endsWith(".tsx")) continue;
         try {
           const stat = fs.statSync(path.join(dir, name));
@@ -176,7 +184,11 @@ async function main() {
       process.exit(1);
     }
   } catch (err) {
-    fail("graph build", `Error: ${err instanceof Error ? err.message : String(err)}`, performance.now() - t0);
+    fail(
+      "graph build",
+      `Error: ${err instanceof Error ? err.message : String(err)}`,
+      performance.now() - t0
+    );
     console.log("\nCannot continue without module graph.");
     process.exit(1);
   }
@@ -185,7 +197,11 @@ async function main() {
   t0 = performance.now();
   if (graph.files.has(testFile)) {
     const result = dependencyTree(graph, testFile);
-    pass("dependency_tree", `${result.nodes} transitive deps from ${testFileRel}`, performance.now() - t0);
+    pass(
+      "dependency_tree",
+      `${result.nodes} transitive deps from ${testFileRel}`,
+      performance.now() - t0
+    );
   } else {
     skip("dependency_tree", `${testFileRel} not in graph`);
   }
@@ -194,7 +210,11 @@ async function main() {
   t0 = performance.now();
   if (graph.files.has(testFile)) {
     const result = dependents(graph, testFile);
-    pass("dependents", `${result.nodes} dependents (${result.directCount} direct)`, performance.now() - t0);
+    pass(
+      "dependents",
+      `${result.nodes} dependents (${result.directCount} direct)`,
+      performance.now() - t0
+    );
   } else {
     skip("dependents", `${testFileRel} not in graph`);
   }
@@ -223,7 +243,11 @@ async function main() {
   t0 = performance.now();
   if (graph.files.has(testFile)) {
     const result = subgraph(graph, [testFile], { depth: 1, direction: "both" });
-    pass("subgraph", `${result.stats.nodeCount} nodes, ${result.stats.edgeCount} edges (depth 1)`, performance.now() - t0);
+    pass(
+      "subgraph",
+      `${result.stats.nodeCount} nodes, ${result.stats.edgeCount} edges (depth 1)`,
+      performance.now() - t0
+    );
   } else {
     skip("subgraph", `${testFileRel} not in graph`);
   }
@@ -258,7 +282,17 @@ async function main() {
   const bar = await client.navbar(testFileRel);
   const navbarMs = performance.now() - t0;
 
-  const symbolKinds = new Set(["function", "const", "class", "interface", "type", "enum", "var", "let", "method"]);
+  const symbolKinds = new Set([
+    "function",
+    "const",
+    "class",
+    "interface",
+    "type",
+    "enum",
+    "var",
+    "let",
+    "method",
+  ]);
   const allSymbols: NavBarItem[] = [];
   function collectSymbols(items: NavBarItem[]): void {
     for (const item of items) {
@@ -281,7 +315,16 @@ async function main() {
   const concreteKinds = new Set(["const", "function", "class", "var", "let", "enum"]);
   const sym = allSymbols.find((s) => concreteKinds.has(s.kind)) ?? allSymbols[0];
   if (!sym) {
-    const toolNames = ["find_symbol", "definition", "references", "type_info", "navigate_to", "blast_radius", "module_exports", "trace_chain"];
+    const toolNames = [
+      "find_symbol",
+      "definition",
+      "references",
+      "type_info",
+      "navigate_to",
+      "blast_radius",
+      "module_exports",
+      "trace_chain",
+    ];
     for (const name of toolNames) skip(name, "No symbol discovered");
   } else {
     const span = sym.spans[0]!;
@@ -290,7 +333,11 @@ async function main() {
     t0 = performance.now();
     const found = findInNavBar(bar, (item) => item.text === sym.text && item.kind === sym.kind);
     if (found && found.spans.length > 0) {
-      pass("find_symbol", `${sym.text} [${sym.kind}] at line ${found.spans[0]!.start.line}`, performance.now() - t0);
+      pass(
+        "find_symbol",
+        `${sym.text} [${sym.kind}] at line ${found.spans[0]!.start.line}`,
+        performance.now() - t0
+      );
     } else {
       fail("find_symbol", `Could not re-find ${sym.text}`, performance.now() - t0);
     }
@@ -309,15 +356,20 @@ async function main() {
     t0 = performance.now();
     const refs = await client.references(testFileRel, span.start.line, span.start.offset);
     const refFiles = new Set(refs.map((r) => r.file));
-    pass("references", `${refs.length} ref(s) across ${refFiles.size} file(s)`, performance.now() - t0);
+    pass(
+      "references",
+      `${refs.length} ref(s) across ${refFiles.size} file(s)`,
+      performance.now() - t0
+    );
 
     // type_info
     t0 = performance.now();
     const info = await client.quickinfo(testFileRel, span.start.line, span.start.offset);
     if (info) {
-      const typeStr = info.displayString.length > 80
-        ? info.displayString.slice(0, 80) + "..."
-        : info.displayString;
+      const typeStr =
+        info.displayString.length > 80
+          ? info.displayString.slice(0, 80) + "..."
+          : info.displayString;
       pass("type_info", typeStr, performance.now() - t0);
     } else {
       fail("type_info", `No type info for ${sym.text}`, performance.now() - t0);
@@ -328,16 +380,28 @@ async function main() {
     const navItems = await client.navto(sym.text, 5);
     if (navItems.length > 0) {
       const files = new Set(navItems.map((i) => i.file));
-      pass("navigate_to", `${navItems.length} match(es) for "${sym.text}" in ${files.size} file(s)`, performance.now() - t0);
+      pass(
+        "navigate_to",
+        `${navItems.length} match(es) for "${sym.text}" in ${files.size} file(s)`,
+        performance.now() - t0
+      );
     } else {
-      pass("navigate_to", `"${sym.text}" not indexed by navto (expected for some kinds)`, performance.now() - t0);
+      pass(
+        "navigate_to",
+        `"${sym.text}" not indexed by navto (expected for some kinds)`,
+        performance.now() - t0
+      );
     }
 
     // blast_radius
     t0 = performance.now();
     const callers = refs.filter((r) => !r.isDefinition);
     const callerFiles = new Set(callers.map((r) => r.file));
-    pass("blast_radius", `${callers.length} usage(s) across ${callerFiles.size} file(s)`, performance.now() - t0);
+    pass(
+      "blast_radius",
+      `${callers.length} usage(s) across ${callerFiles.size} file(s)`,
+      performance.now() - t0
+    );
 
     // module_exports
     t0 = performance.now();
@@ -358,7 +422,11 @@ async function main() {
       const importSym = findInNavBar(bar, (item) => item.text === firstName);
       if (importSym && importSym.spans.length > 0) {
         const chain: string[] = [testFileRel];
-        let cur = { file: testFileRel, line: importSym.spans[0]!.start.line, offset: importSym.spans[0]!.start.offset };
+        let cur = {
+          file: testFileRel,
+          line: importSym.spans[0]!.start.line,
+          offset: importSym.spans[0]!.start.offset,
+        };
         for (let i = 0; i < 5; i++) {
           const hopDefs = await client.definition(cur.file, cur.line, cur.offset);
           if (hopDefs.length === 0) break;
@@ -369,12 +437,24 @@ async function main() {
           cur = { file: hop.file, line: hop.start.line, offset: hop.start.offset };
         }
         if (chain.length > 1) {
-          pass("trace_chain", `${chain.length - 1} hop(s): ${chain.join(" -> ")}`, performance.now() - t0);
+          pass(
+            "trace_chain",
+            `${chain.length - 1} hop(s): ${chain.join(" -> ")}`,
+            performance.now() - t0
+          );
         } else {
-          pass("trace_chain", `"${firstName}" resolved in-file (0 external hops)`, performance.now() - t0);
+          pass(
+            "trace_chain",
+            `"${firstName}" resolved in-file (0 external hops)`,
+            performance.now() - t0
+          );
         }
       } else {
-        pass("trace_chain", `"${firstName}" not in navbar (may be type-only)`, performance.now() - t0);
+        pass(
+          "trace_chain",
+          `"${firstName}" not in navbar (may be type-only)`,
+          performance.now() - t0
+        );
       }
     } else {
       skip("trace_chain", "No brace imports in test file");

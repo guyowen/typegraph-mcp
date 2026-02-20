@@ -11,9 +11,8 @@
   },
   "scripts": {
     "start": "tsx server.ts",
-    "test": "tsx test-tools.ts",
-    "check": "tsx check.ts",
-    "smoke-test": "tsx smoke-test.ts"
+    "test": "tsx smoke-test.ts",
+    "check": "tsx check.ts"
   },
   "devDependencies": {
     "@types/node": "^25.3.0"
