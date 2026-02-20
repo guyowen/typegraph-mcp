@@ -34,7 +34,7 @@ export interface BuildGraphResult {
 
 // ─── Logging ─────────────────────────────────────────────────────────────────
 
-const log = (...args: unknown[]) => console.error("[ts-nav/graph]", ...args);
+const log = (...args: unknown[]) => console.error("[typegraph/graph]", ...args);
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -114,7 +114,7 @@ function parseFileImports(filePath: string, source: string): RawImport[] {
           ? "default"
           : kind === "All" || kind === "AllButDefault" || kind === "NamespaceObject"
             ? "*"
-            : entry.importName.name ?? entry.localName.value;
+            : (entry.importName.name ?? entry.localName.value);
       names.push(name);
       if (!entry.isType) allTypeOnly = false;
     }
@@ -139,12 +139,10 @@ function parseFileImports(filePath: string, source: string): RawImport[] {
       const name =
         entryKind === "AllButDefault" || entryKind === "All" || entryKind === "NamespaceObject"
           ? "*"
-          : entry.importName.name ?? "*";
+          : (entry.importName.name ?? "*");
 
       // Group by specifier — multiple entries from same module
-      const existing = imports.find(
-        (i) => i.specifier === specifier && !i.isDynamic
-      );
+      const existing = imports.find((i) => i.specifier === specifier && !i.isDynamic);
       if (existing) {
         if (!existing.names.includes(name)) existing.names.push(name);
       } else {
@@ -465,29 +463,38 @@ export function startWatcher(
   resolver: ResolverFactory
 ): void {
   try {
-    const watcher = fs.watch(projectRoot, { recursive: true }, (_eventType: string, filename: string | null) => {
-      if (!filename) return;
+    const watcher = fs.watch(
+      projectRoot,
+      { recursive: true },
+      (_eventType: string, filename: string | null) => {
+        if (!filename) return;
 
-      // Filter to TS files only
-      const ext = path.extname(filename);
-      if (!TS_EXTENSIONS.has(ext)) return;
+        // Filter to TS files only
+        const ext = path.extname(filename);
+        if (!TS_EXTENSIONS.has(ext)) return;
 
-      // Skip excluded directories and files
-      const parts = filename.split(path.sep);
-      if (parts.some((p: string) => SKIP_DIRS.has(p))) return;
-      if (SKIP_FILES.has(path.basename(filename))) return;
-      if (filename.endsWith(".d.ts") || filename.endsWith(".d.mts") || filename.endsWith(".d.cts")) return;
+        // Skip excluded directories and files
+        const parts = filename.split(path.sep);
+        if (parts.some((p: string) => SKIP_DIRS.has(p))) return;
+        if (SKIP_FILES.has(path.basename(filename))) return;
+        if (
+          filename.endsWith(".d.ts") ||
+          filename.endsWith(".d.mts") ||
+          filename.endsWith(".d.cts")
+        )
+          return;
 
-      const absPath = path.resolve(projectRoot, filename);
+        const absPath = path.resolve(projectRoot, filename);
 
-      if (fs.existsSync(absPath)) {
-        // File created or modified
-        updateFile(graph, absPath, resolver, projectRoot);
-      } else {
-        // File deleted
-        removeFile(graph, absPath);
+        if (fs.existsSync(absPath)) {
+          // File created or modified
+          updateFile(graph, absPath, resolver, projectRoot);
+        } else {
+          // File deleted
+          removeFile(graph, absPath);
+        }
       }
-    });
+    );
 
     // Cleanup on process exit
     process.on("SIGINT", () => watcher.close());

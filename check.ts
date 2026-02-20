@@ -1,11 +1,11 @@
 #!/usr/bin/env npx tsx
 /**
- * ts-nav-mcp Health Check — Verifies all setup requirements are met.
+ * typegraph-mcp Health Check — Verifies all setup requirements are met.
  *
  * Run from project root:
- *   npx tsx tools/ts-nav-mcp/check.ts
+ *   npx tsx tools/typegraph-mcp/check.ts
  *
- * Or from tools/ts-nav-mcp/:
+ * Or from tools/typegraph-mcp/:
  *   pnpm check
  */
 
@@ -20,19 +20,19 @@ import { spawn } from "node:child_process";
 const toolDir = import.meta.dirname;
 
 // Detect project root:
-//   1. TS_NAV_PROJECT_ROOT env var (explicit)
-//   2. If check.ts is inside tools/ts-nav-mcp/, go up two levels
+//   1. TYPEGRAPH_PROJECT_ROOT env var (explicit)
+//   2. If check.ts is inside tools/typegraph-mcp/, go up two levels
 //   3. Otherwise, use cwd (standalone deployment, run from target project)
 const cwd = process.cwd();
-const projectRoot = process.env["TS_NAV_PROJECT_ROOT"]
-  ? path.resolve(cwd, process.env["TS_NAV_PROJECT_ROOT"])
+const projectRoot = process.env["TYPEGRAPH_PROJECT_ROOT"]
+  ? path.resolve(cwd, process.env["TYPEGRAPH_PROJECT_ROOT"])
   : path.basename(path.dirname(toolDir)) === "tools"
     ? path.resolve(toolDir, "../..")
     : cwd;
 
-const tsconfigPath = process.env["TS_NAV_TSCONFIG"] || "./tsconfig.json";
+const tsconfigPath = process.env["TYPEGRAPH_TSCONFIG"] || "./tsconfig.json";
 
-// Is ts-nav-mcp embedded inside the project (e.g. tools/ts-nav-mcp/)?
+// Is typegraph-mcp embedded inside the project (e.g. tools/typegraph-mcp/)?
 const toolIsEmbedded = toolDir.startsWith(projectRoot + path.sep);
 const toolRelPath = toolIsEmbedded ? path.relative(projectRoot, toolDir) : toolDir;
 
@@ -67,7 +67,7 @@ function skip(msg: string): void {
 
 async function main() {
   console.log("");
-  console.log("ts-nav-mcp Health Check");
+  console.log("typegraph-mcp Health Check");
   console.log("=======================");
   console.log(`Project root: ${projectRoot}`);
   console.log("");
@@ -120,18 +120,18 @@ async function main() {
   if (fs.existsSync(mcpJsonPath)) {
     try {
       const mcpJson = JSON.parse(fs.readFileSync(mcpJsonPath, "utf-8"));
-      const tsNav = mcpJson?.mcpServers?.["ts-nav"];
+      const tsNav = mcpJson?.mcpServers?.["typegraph"];
       if (tsNav) {
         const hasCommand = tsNav.command === "npx";
         const hasArgs = Array.isArray(tsNav.args) && tsNav.args.includes("tsx");
-        const hasEnv = tsNav.env?.["TS_NAV_PROJECT_ROOT"] && tsNav.env?.["TS_NAV_TSCONFIG"];
+        const hasEnv = tsNav.env?.["TYPEGRAPH_PROJECT_ROOT"] && tsNav.env?.["TYPEGRAPH_TSCONFIG"];
         if (hasCommand && hasArgs && hasEnv) {
           pass("MCP registered in .claude/mcp.json");
         } else {
           const issues: string[] = [];
           if (!hasCommand) issues.push("command should be 'npx'");
           if (!hasArgs) issues.push("args should include 'tsx'");
-          if (!hasEnv) issues.push("env should set TS_NAV_PROJECT_ROOT and TS_NAV_TSCONFIG");
+          if (!hasEnv) issues.push("env should set TYPEGRAPH_PROJECT_ROOT and TYPEGRAPH_TSCONFIG");
           fail(
             `MCP registration incomplete: ${issues.join(", ")}`,
             "See README for correct .claude/mcp.json format"
@@ -139,17 +139,17 @@ async function main() {
         }
       } else {
         const serverPath = toolIsEmbedded
-            ? `./${toolRelPath}/server.ts`
-            : path.resolve(toolDir, "server.ts");
+          ? `./${toolRelPath}/server.ts`
+          : path.resolve(toolDir, "server.ts");
         fail(
-          "MCP entry 'ts-nav' not found in .claude/mcp.json",
+          "MCP entry 'typegraph' not found in .claude/mcp.json",
           `Add to .claude/mcp.json:\n` +
             `    {\n` +
             `      "mcpServers": {\n` +
-            `        "ts-nav": {\n` +
+            `        "typegraph": {\n` +
             `          "command": "npx",\n` +
             `          "args": ["tsx", "${serverPath}"],\n` +
-            `          "env": { "TS_NAV_PROJECT_ROOT": ".", "TS_NAV_TSCONFIG": "./tsconfig.json" }\n` +
+            `          "env": { "TYPEGRAPH_PROJECT_ROOT": ".", "TYPEGRAPH_TSCONFIG": "./tsconfig.json" }\n` +
             `        }\n` +
             `      }\n` +
             `    }`
@@ -162,10 +162,10 @@ async function main() {
       );
     }
   } else {
-    fail(".claude/mcp.json not found", `Create .claude/mcp.json with ts-nav server registration`);
+    fail(".claude/mcp.json not found", `Create .claude/mcp.json with typegraph server registration`);
   }
 
-  // 6. ts-nav-mcp dependencies installed
+  // 6. typegraph-mcp dependencies installed
   const toolNodeModules = path.join(toolDir, "node_modules");
   if (fs.existsSync(toolNodeModules)) {
     const requiredPkgs = ["@modelcontextprotocol/sdk", "oxc-parser", "oxc-resolver", "zod"];
@@ -178,7 +178,7 @@ async function main() {
       fail(`Missing packages: ${missing.join(", ")}`, `Run \`cd ${toolRelPath} && pnpm install\``);
     }
   } else {
-    fail("ts-nav-mcp dependencies not installed", `Run \`cd ${toolRelPath} && pnpm install\``);
+    fail("typegraph-mcp dependencies not installed", `Run \`cd ${toolRelPath} && pnpm install\``);
   }
 
   // 7. oxc-parser smoke test
@@ -288,20 +288,20 @@ async function main() {
     );
   }
 
-  // 11. ESLint ignores (only when ts-nav-mcp is embedded inside the project)
+  // 11. ESLint ignores (only when typegraph-mcp is embedded inside the project)
   if (toolIsEmbedded) {
     const eslintConfigPath = path.resolve(projectRoot, "eslint.config.mjs");
     if (fs.existsSync(eslintConfigPath)) {
       const eslintContent = fs.readFileSync(eslintConfigPath, "utf-8");
       const hasToolsIgnore = /["']tools\/\*\*["']/.test(eslintContent);
-      const hasTestIgnore = /["']\.ts-nav-test\/\*\*["']/.test(eslintContent);
+      const hasTestIgnore = /["']\.typegraph-test\/\*\*["']/.test(eslintContent);
 
       if (hasToolsIgnore && hasTestIgnore) {
-        pass("ESLint ignores tools/ and .ts-nav-test/");
+        pass("ESLint ignores tools/ and .typegraph-test/");
       } else {
         const missing: string[] = [];
         if (!hasToolsIgnore) missing.push('"tools/**"');
-        if (!hasTestIgnore) missing.push('".ts-nav-test/**"');
+        if (!hasTestIgnore) missing.push('".typegraph-test/**"');
         fail(
           `ESLint missing ignores: ${missing.join(", ")}`,
           `Add to the ignores array in eslint.config.mjs:\n` +
@@ -312,7 +312,7 @@ async function main() {
       skip("ESLint config check (no eslint.config.mjs)");
     }
   } else {
-    skip("ESLint config check (ts-nav-mcp is external to project)");
+    skip("ESLint config check (typegraph-mcp is external to project)");
   }
 
   // 12. .gitignore check (optional)
@@ -327,8 +327,9 @@ async function main() {
       (l: string) => l === ".claude/" || l === ".claude" || l === "/.claude"
     );
 
-    // Only check tools/ exclusion when ts-nav-mcp is embedded
-    const ignoresTools = toolIsEmbedded &&
+    // Only check tools/ exclusion when typegraph-mcp is embedded
+    const ignoresTools =
+      toolIsEmbedded &&
       lines.some((l: string) => l === "tools/" || l === "tools" || l === "/tools");
 
     if (!ignoresTools && !ignoresClaude) {
@@ -354,7 +355,7 @@ async function main() {
     console.log(
       `${passed}/${total} checks passed` +
         (warned > 0 ? ` (${warned} warning${warned > 1 ? "s" : ""})` : "") +
-        " -- ts-nav-mcp is ready"
+        " -- typegraph-mcp is ready"
     );
   } else {
     console.log(

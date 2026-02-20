@@ -1,14 +1,14 @@
 #!/usr/bin/env npx tsx
 /**
- * ts-nav-mcp Smoke Test — Verifies all 14 tools work against the target project.
+ * typegraph-mcp Smoke Test — Verifies all 14 tools work against the target project.
  *
  * Dynamically discovers files and symbols from whatever project it's pointed at.
  *
  * Run from project root:
- *   npx tsx tools/ts-nav-mcp/smoke-test.ts
+ *   npx tsx tools/typegraph-mcp/smoke-test.ts
  *
  * Or pointing at a project:
- *   TS_NAV_PROJECT_ROOT=/path/to/project npx tsx /path/to/ts-nav-mcp/smoke-test.ts
+ *   TYPEGRAPH_PROJECT_ROOT=/path/to/project npx tsx /path/to/typegraph-mcp/smoke-test.ts
  */
 
 import * as fs from "node:fs";
@@ -28,12 +28,12 @@ import {
 
 const toolDir = import.meta.dirname;
 const cwd = process.cwd();
-const projectRoot = process.env["TS_NAV_PROJECT_ROOT"]
-  ? path.resolve(cwd, process.env["TS_NAV_PROJECT_ROOT"])
+const projectRoot = process.env["TYPEGRAPH_PROJECT_ROOT"]
+  ? path.resolve(cwd, process.env["TYPEGRAPH_PROJECT_ROOT"])
   : path.basename(path.dirname(toolDir)) === "tools"
     ? path.resolve(toolDir, "../..")
     : cwd;
-const tsconfigPath = process.env["TS_NAV_TSCONFIG"] || "./tsconfig.json";
+const tsconfigPath = process.env["TYPEGRAPH_TSCONFIG"] || "./tsconfig.json";
 
 // ─── Test Harness ────────────────────────────────────────────────────────────
 
@@ -146,7 +146,7 @@ function findImporter(graph: ModuleGraph, file: string): string | null {
 
 async function main() {
   console.log("");
-  console.log("ts-nav-mcp Smoke Test");
+  console.log("typegraph-mcp Smoke Test");
   console.log("=====================");
   console.log(`Project root: ${projectRoot}`);
   console.log("");

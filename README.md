@@ -1,4 +1,4 @@
-# ts-nav-mcp
+# typegraph-mcp
 
 Give your AI coding agent the same TypeScript understanding your IDE has.
 
@@ -14,7 +14,7 @@ Every wrong turn burns context tokens and degrades the agent's output.
 
 Measured on a real monorepo — tracing a call chain from an API handler to its implementation:
 
-| | grep | ts-nav-mcp |
+| | grep | typegraph-mcp |
 |---|---|---|
 | **Tokens consumed** | ~113,000 | 1,006 |
 | **Files touched** | 47 | 3 |
@@ -32,7 +32,7 @@ Agent: I need to find where createUser is implemented.
   → burns ~113,000 tokens, still not sure it found the right implementation
 ```
 
-### After: ts-nav-mcp
+### After: typegraph-mcp
 
 ```
 Agent: ts_trace_chain({ file: "src/handlers.ts", symbol: "createUser" })
@@ -46,8 +46,8 @@ Agent: ts_trace_chain({ file: "src/handlers.ts", symbol: "createUser" })
 ### 1. Install
 
 ```bash
-git clone https://github.com/AltClick/ts-nav-mcp.git ~/ts-nav-mcp
-cd ~/ts-nav-mcp && pnpm install
+git clone https://github.com/AltClick/typegraph-mcp.git ~/typegraph-mcp
+cd ~/typegraph-mcp && pnpm install
 ```
 
 ### 2. Register
@@ -57,28 +57,28 @@ Add to `.claude/mcp.json` in your project (or `~/.claude/mcp.json` for global):
 ```json
 {
   "mcpServers": {
-    "ts-nav": {
+    "typegraph": {
       "command": "npx",
-      "args": ["tsx", "/absolute/path/to/ts-nav-mcp/server.ts"],
+      "args": ["tsx", "/absolute/path/to/typegraph-mcp/server.ts"],
       "env": {
-        "TS_NAV_PROJECT_ROOT": ".",
-        "TS_NAV_TSCONFIG": "./tsconfig.json"
+        "TYPEGRAPH_PROJECT_ROOT": ".",
+        "TYPEGRAPH_TSCONFIG": "./tsconfig.json"
       }
     }
   }
 }
 ```
 
-`TS_NAV_PROJECT_ROOT` resolves relative to the agent's working directory. Use `"."` for project-local config. The `args` path to `server.ts` must be absolute.
+`TYPEGRAPH_PROJECT_ROOT` resolves relative to the agent's working directory. Use `"."` for project-local config. The `args` path to `server.ts` must be absolute.
 
 ### 3. Verify
 
 ```bash
 # Configuration check — are all dependencies and settings correct?
-npx tsx ~/ts-nav-mcp/check.ts
+npx tsx ~/typegraph-mcp/check.ts
 
 # Smoke test — do all 14 tools actually work on your codebase?
-npx tsx ~/ts-nav-mcp/smoke-test.ts
+npx tsx ~/typegraph-mcp/smoke-test.ts
 ```
 
 `check.ts` validates configuration (12 checks: Node.js, TypeScript, tsconfig, MCP registration, dependencies, etc.). `smoke-test.ts` dynamically discovers a file in your project and exercises all 14 tools against it — graph build, dependency tree, cycle detection, go-to-definition, references, type info, and more. Both should pass.
@@ -91,7 +91,7 @@ First query takes ~2s (tsserver warmup). Subsequent queries: 1–60ms.
 
 - **Node.js** >= 18
 - **TypeScript** >= 5.0 in the target project (`node_modules`)
-- **pnpm** for installing ts-nav-mcp dependencies
+- **pnpm** for installing typegraph-mcp dependencies
 
 ## Tools
 
@@ -240,7 +240,7 @@ Works out of the box with TypeScript project references:
 - `extensionAlias` for NodeNext `.js` → `.ts` import mapping
 - Cross-package barrel re-export resolution
 
-Point `TS_NAV_TSCONFIG` at your root `tsconfig.json` that includes all project references.
+Point `TYPEGRAPH_TSCONFIG` at your root `tsconfig.json` that includes all project references.
 
 ## Deploying to a new project
 
@@ -252,19 +252,19 @@ Point `TS_NAV_TSCONFIG` at your root `tsconfig.json` that includes all project r
 
 2. **Install dependencies** (one-time):
    ```bash
-   cd /path/to/ts-nav-mcp && pnpm install
+   cd /path/to/typegraph-mcp && pnpm install
    ```
 
 3. **Register the MCP server** — add to `.claude/mcp.json`:
    ```json
    {
      "mcpServers": {
-       "ts-nav": {
+       "typegraph": {
          "command": "npx",
-         "args": ["tsx", "/absolute/path/to/ts-nav-mcp/server.ts"],
+         "args": ["tsx", "/absolute/path/to/typegraph-mcp/server.ts"],
          "env": {
-           "TS_NAV_PROJECT_ROOT": ".",
-           "TS_NAV_TSCONFIG": "./tsconfig.json"
+           "TYPEGRAPH_PROJECT_ROOT": ".",
+           "TYPEGRAPH_TSCONFIG": "./tsconfig.json"
          }
        }
      }
@@ -273,32 +273,37 @@ Point `TS_NAV_TSCONFIG` at your root `tsconfig.json` that includes all project r
 
 4. **Run the health check and smoke test**:
    ```bash
-   npx tsx /path/to/ts-nav-mcp/check.ts
-   npx tsx /path/to/ts-nav-mcp/smoke-test.ts
+   npx tsx /path/to/typegraph-mcp/check.ts
+   npx tsx /path/to/typegraph-mcp/smoke-test.ts
    ```
    `check.ts` verifies configuration. `smoke-test.ts` exercises all 14 tools against the project. Every failing check shows a `Fix:` instruction.
 
-5. **Restart the agent session** and test with any `ts_*` tool.
+5. **Add a check script** to the project's `package.json`:
+   ```json
+   "typegraph:check": "tsx /path/to/typegraph-mcp/check.ts && tsx /path/to/typegraph-mcp/smoke-test.ts"
+   ```
+
+6. **Restart the agent session** and test with any `ts_*` tool.
 
 ### ESLint configuration
 
-If ts-nav-mcp is embedded inside the project (e.g. `tools/ts-nav-mcp/`) and the project uses `typescript-eslint`, add to your ESLint `ignores`:
+If typegraph-mcp is embedded inside the project (e.g. `tools/typegraph-mcp/`) and the project uses `typescript-eslint`, add to your ESLint `ignores`:
 
 ```javascript
 ignores: [
   "tools/**",
-  ".ts-nav-test/**",
+  ".typegraph-test/**",
 ]
 ```
 
-Not needed when ts-nav-mcp lives outside the project tree.
+Not needed when typegraph-mcp lives outside the project tree.
 
-### CLAUDE.md snippet
+### Agent instructions snippet
 
-Add this to the project's `CLAUDE.md` so the agent knows to use ts-nav instead of grep:
+Add this to your agent instructions file (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, etc.) so the agent uses TypeGraph instead of grep:
 
 ```markdown
-## TypeScript Navigation (ts-nav-mcp)
+## TypeScript Navigation (typegraph-mcp)
 
 Use the `ts_*` MCP tools instead of grep/glob for navigating TypeScript code. They resolve through barrel files, re-exports, and project references — returning precise results, not string matches.
 
@@ -311,14 +316,14 @@ Use the `ts_*` MCP tools instead of grep/glob for navigating TypeScript code. Th
 Run the health check first — it catches most issues:
 
 ```bash
-npx tsx /path/to/ts-nav-mcp/check.ts
+npx tsx /path/to/typegraph-mcp/check.ts
 ```
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| Server won't start | Dependencies missing | `cd /path/to/ts-nav-mcp && pnpm install` |
+| Server won't start | Dependencies missing | `cd /path/to/typegraph-mcp && pnpm install` |
 | "TypeScript not found" | Target project missing TS | Add `typescript` to devDependencies |
-| Tools return empty results | tsconfig misconfigured | Check `TS_NAV_TSCONFIG` points to the right file |
+| Tools return empty results | tsconfig misconfigured | Check `TYPEGRAPH_TSCONFIG` points to the right file |
 | MCP registration not found | Wrong path in config | Verify the `args` path to `server.ts` is absolute |
 
 ## Known limitations

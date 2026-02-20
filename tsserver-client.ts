@@ -67,7 +67,7 @@ export interface NavBarItem {
 
 // ─── Logging ─────────────────────────────────────────────────────────────────
 
-const log = (...args: unknown[]) => console.error("[ts-nav/tsserver]", ...args);
+const log = (...args: unknown[]) => console.error("[typegraph/tsserver]", ...args);
 
 // ─── TsServerClient ─────────────────────────────────────────────────────────
 
@@ -131,18 +131,11 @@ export class TsServerClient {
     log(`Project root: ${this.projectRoot}`);
     log(`tsconfig: ${this.tsconfigPath}`);
 
-    this.child = spawn(
-      "node",
-      [
-        tsserverPath,
-        "--disableAutomaticTypingAcquisition",
-      ],
-      {
-        cwd: this.projectRoot,
-        stdio: ["pipe", "pipe", "pipe"],
-        env: { ...process.env, TSS_LOG: undefined },
-      }
-    );
+    this.child = spawn("node", [tsserverPath, "--disableAutomaticTypingAcquisition"], {
+      cwd: this.projectRoot,
+      stdio: ["pipe", "pipe", "pipe"],
+      env: { ...process.env, TSS_LOG: undefined },
+    });
 
     this.child.stdout!.on("data", (chunk: Buffer) => this.onData(chunk));
     this.child.stderr!.on("data", (chunk: Buffer) => {
@@ -276,9 +269,7 @@ export class TsServerClient {
           pending.resolve(message.body);
         } else {
           pending.reject(
-            new Error(
-              `tsserver ${pending.command} failed: ${message.message ?? "unknown error"}`
-            )
+            new Error(`tsserver ${pending.command} failed: ${message.message ?? "unknown error"}`)
           );
         }
       }
@@ -334,11 +325,7 @@ export class TsServerClient {
 
   // ─── Public API ────────────────────────────────────────────────────────
 
-  async definition(
-    file: string,
-    line: number,
-    offset: number
-  ): Promise<DefinitionResult[]> {
+  async definition(file: string, line: number, offset: number): Promise<DefinitionResult[]> {
     const absPath = this.resolvePath(file);
     await this.ensureOpen(absPath);
 
@@ -356,11 +343,7 @@ export class TsServerClient {
     }));
   }
 
-  async references(
-    file: string,
-    line: number,
-    offset: number
-  ): Promise<ReferenceEntry[]> {
+  async references(file: string, line: number, offset: number): Promise<ReferenceEntry[]> {
     const absPath = this.resolvePath(file);
     await this.ensureOpen(absPath);
 
@@ -378,11 +361,7 @@ export class TsServerClient {
     }));
   }
 
-  async quickinfo(
-    file: string,
-    line: number,
-    offset: number
-  ): Promise<QuickInfoResult | null> {
+  async quickinfo(file: string, line: number, offset: number): Promise<QuickInfoResult | null> {
     const absPath = this.resolvePath(file);
     await this.ensureOpen(absPath);
 
@@ -401,11 +380,7 @@ export class TsServerClient {
     }
   }
 
-  async navto(
-    searchValue: string,
-    maxResults = 10,
-    file?: string
-  ): Promise<NavToItem[]> {
+  async navto(searchValue: string, maxResults = 10, file?: string): Promise<NavToItem[]> {
     // If a file is specified, open it first so tsserver knows about it
     if (file) await this.ensureOpen(file);
 

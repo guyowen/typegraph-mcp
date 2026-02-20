@@ -1,6 +1,6 @@
 #!/usr/bin/env npx tsx
 /**
- * TS Nav MCP Server — Type-aware codebase navigation for Claude Code.
+ * TypeGraph MCP Server — Type-aware codebase navigation for AI coding agents.
  *
  * Bridges MCP protocol (stdin/stdout) to tsserver (child process pipes).
  * Provides 14 tools for definition, references, type info, symbol search,
@@ -11,8 +11,8 @@
  *   npx tsx server.ts
  *
  * Environment:
- *   TS_NAV_PROJECT_ROOT  — project root (default: cwd)
- *   TS_NAV_TSCONFIG      — tsconfig path (default: ./tsconfig.json)
+ *   TYPEGRAPH_PROJECT_ROOT  — project root (default: cwd)
+ *   TYPEGRAPH_TSCONFIG      — tsconfig path (default: ./tsconfig.json)
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -33,10 +33,10 @@ import * as path from "node:path";
 
 // ─── Configuration ───────────────────────────────────────────────────────────
 
-const projectRoot = process.env["TS_NAV_PROJECT_ROOT"] || process.cwd();
-const tsconfigPath = process.env["TS_NAV_TSCONFIG"] || "./tsconfig.json";
+const projectRoot = process.env["TYPEGRAPH_PROJECT_ROOT"] || process.cwd();
+const tsconfigPath = process.env["TYPEGRAPH_TSCONFIG"] || "./tsconfig.json";
 
-const log = (...args: unknown[]) => console.error("[ts-nav]", ...args);
+const log = (...args: unknown[]) => console.error("[typegraph]", ...args);
 
 // ─── Initialize ──────────────────────────────────────────────────────────────
 
@@ -46,7 +46,7 @@ const client = new TsServerClient(projectRoot, tsconfigPath);
 let moduleGraph: ModuleGraph;
 
 const mcpServer = new McpServer({
-  name: "ts-nav",
+  name: "typegraph",
   version: "1.0.0",
 });
 
@@ -108,9 +108,7 @@ async function resolveSymbol(
   // Strategy 2: navto (project-wide search, filtered by file)
   const items = await client.navto(symbol, 10, file);
   // Prefer exact match in the specified file
-  const inFile = items.find(
-    (i) => i.name === symbol && i.file === file
-  );
+  const inFile = items.find((i) => i.name === symbol && i.file === file);
   const best = inFile ?? items.find((i) => i.name === symbol) ?? items[0];
 
   if (best) {
@@ -134,15 +132,28 @@ async function resolveSymbol(
  */
 const locationOrSymbol = {
   file: z.string().describe("File path (relative to project root or absolute)"),
-  line: z.number().int().positive().optional().describe("Line number (1-based). Required if symbol is not provided."),
-  column: z.number().int().positive().optional().describe("Column/offset (1-based). Required if symbol is not provided."),
+  line: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe("Line number (1-based). Required if symbol is not provided."),
+  column: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe("Column/offset (1-based). Required if symbol is not provided."),
   symbol: z.string().optional().describe("Symbol name to find. Alternative to line+column."),
 };
 
 /** Resolve params to coordinates: use line+column if provided, else find symbol */
-async function resolveParams(
-  params: { file: string; line?: number; column?: number; symbol?: string }
-): Promise<{ file: string; line: number; column: number } | { error: string }> {
+async function resolveParams(params: {
+  file: string;
+  line?: number;
+  column?: number;
+  symbol?: string;
+}): Promise<{ file: string; line: number; column: number } | { error: string }> {
   if (params.line !== undefined && params.column !== undefined) {
     return { file: params.file, line: params.line, column: params.column };
   }
@@ -302,7 +313,12 @@ mcpServer.tool(
   "Search for a symbol across the entire project without knowing which file it's in. Returns matching declarations. Optionally provide a file hint to also search that file's navbar (useful for object literal keys like RPC handlers that navto doesn't index).",
   {
     symbol: z.string().describe("Symbol name to search for"),
-    file: z.string().optional().describe("Optional file to also search via navbar (covers object literal keys not indexed by navto)"),
+    file: z
+      .string()
+      .optional()
+      .describe(
+        "Optional file to also search via navbar (covers object literal keys not indexed by navto)"
+      ),
     maxResults: z
       .number()
       .int()
@@ -570,20 +586,31 @@ mcpServer.tool(
   "Get the transitive dependency tree (imports) of a file. Shows what a file depends on, directly and transitively.",
   {
     file: z.string().describe("File to analyze (relative or absolute path)"),
-    depth: z.number().int().positive().optional().describe("Max traversal depth (default: unlimited)"),
-    includeTypeOnly: z.boolean().optional().default(false).describe("Include type-only imports (default: false)"),
+    depth: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe("Max traversal depth (default: unlimited)"),
+    includeTypeOnly: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe("Include type-only imports (default: false)"),
   },
   async ({ file, depth, includeTypeOnly }) => {
     const result = dependencyTree(moduleGraph, absPath(file), { depth, includeTypeOnly });
     return {
-      content: [{
-        type: "text" as const,
-        text: JSON.stringify({
-          root: relPath(result.root),
-          nodes: result.nodes,
-          files: result.files.map(relPath),
-        }),
-      }],
+      content: [
+        {
+          type: "text" as const,
+          text: JSON.stringify({
+            root: relPath(result.root),
+            nodes: result.nodes,
+            files: result.files.map(relPath),
+          }),
+        },
+      ],
     };
   }
 );
@@ -595,8 +622,17 @@ mcpServer.tool(
   "Find all files that depend on (import) a given file, directly and transitively. Groups results by package.",
   {
     file: z.string().describe("File to analyze (relative or absolute path)"),
-    depth: z.number().int().positive().optional().describe("Max traversal depth (default: unlimited)"),
-    includeTypeOnly: z.boolean().optional().default(false).describe("Include type-only imports (default: false)"),
+    depth: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe("Max traversal depth (default: unlimited)"),
+    includeTypeOnly: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe("Include type-only imports (default: false)"),
   },
   async ({ file, depth, includeTypeOnly }) => {
     const result = dependents(moduleGraph, absPath(file), { depth, includeTypeOnly });
@@ -605,16 +641,18 @@ mcpServer.tool(
       byPackageRel[pkg] = files.map(relPath);
     }
     return {
-      content: [{
-        type: "text" as const,
-        text: JSON.stringify({
-          root: relPath(result.root),
-          nodes: result.nodes,
-          directCount: result.directCount,
-          files: result.files.map(relPath),
-          byPackage: byPackageRel,
-        }),
-      }],
+      content: [
+        {
+          type: "text" as const,
+          text: JSON.stringify({
+            root: relPath(result.root),
+            nodes: result.nodes,
+            directCount: result.directCount,
+            files: result.files.map(relPath),
+            byPackage: byPackageRel,
+          }),
+        },
+      ],
     };
   }
 );
@@ -634,13 +672,15 @@ mcpServer.tool(
       package: pkg ? absPath(pkg) : undefined,
     });
     return {
-      content: [{
-        type: "text" as const,
-        text: JSON.stringify({
-          count: result.count,
-          cycles: result.cycles.map((cycle) => cycle.map(relPath)),
-        }),
-      }],
+      content: [
+        {
+          type: "text" as const,
+          text: JSON.stringify({
+            count: result.count,
+            cycles: result.cycles.map((cycle) => cycle.map(relPath)),
+          }),
+        },
+      ],
     };
   }
 );
@@ -653,22 +693,28 @@ mcpServer.tool(
   {
     from: z.string().describe("Source file (relative or absolute path)"),
     to: z.string().describe("Target file (relative or absolute path)"),
-    includeTypeOnly: z.boolean().optional().default(false).describe("Include type-only imports (default: false)"),
+    includeTypeOnly: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe("Include type-only imports (default: false)"),
   },
   async ({ from, to, includeTypeOnly }) => {
     const result = shortestPath(moduleGraph, absPath(from), absPath(to), { includeTypeOnly });
     return {
-      content: [{
-        type: "text" as const,
-        text: JSON.stringify({
-          path: result.path?.map(relPath) ?? null,
-          hops: result.hops,
-          chain: result.chain.map((c) => ({
-            file: relPath(c.file),
-            imports: c.imports,
-          })),
-        }),
-      }],
+      content: [
+        {
+          type: "text" as const,
+          text: JSON.stringify({
+            path: result.path?.map(relPath) ?? null,
+            hops: result.hops,
+            chain: result.chain.map((c) => ({
+              file: relPath(c.file),
+              imports: c.imports,
+            })),
+          }),
+        },
+      ],
     };
   }
 );
@@ -680,25 +726,37 @@ mcpServer.tool(
   "Extract a subgraph around seed files. Expands by depth hops in the specified direction (imports, dependents, or both).",
   {
     files: z.array(z.string()).describe("Seed files to expand from (relative or absolute paths)"),
-    depth: z.number().int().positive().optional().default(1).describe("Hops to expand (default: 1)"),
-    direction: z.enum(["imports", "dependents", "both"]).optional().default("both").describe("Direction to expand (default: both)"),
+    depth: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .default(1)
+      .describe("Hops to expand (default: 1)"),
+    direction: z
+      .enum(["imports", "dependents", "both"])
+      .optional()
+      .default("both")
+      .describe("Direction to expand (default: both)"),
   },
   async ({ files, depth, direction }) => {
     const result = subgraph(moduleGraph, files.map(absPath), { depth, direction });
     return {
-      content: [{
-        type: "text" as const,
-        text: JSON.stringify({
-          nodes: result.nodes.map(relPath),
-          edges: result.edges.map((e) => ({
-            from: relPath(e.from),
-            to: relPath(e.to),
-            specifiers: e.specifiers,
-            isTypeOnly: e.isTypeOnly,
-          })),
-          stats: result.stats,
-        }),
-      }],
+      content: [
+        {
+          type: "text" as const,
+          text: JSON.stringify({
+            nodes: result.nodes.map(relPath),
+            edges: result.edges.map((e) => ({
+              from: relPath(e.from),
+              to: relPath(e.to),
+              specifiers: e.specifiers,
+              isTypeOnly: e.isTypeOnly,
+            })),
+            stats: result.stats,
+          }),
+        },
+      ],
     };
   }
 );
@@ -709,29 +767,33 @@ mcpServer.tool(
   "ts_module_boundary",
   "Analyze the boundary of a set of files: incoming/outgoing edges, shared dependencies, and an isolation score. Useful for understanding module coupling.",
   {
-    files: z.array(z.string()).describe("Files defining the module boundary (relative or absolute paths)"),
+    files: z
+      .array(z.string())
+      .describe("Files defining the module boundary (relative or absolute paths)"),
   },
   async ({ files }) => {
     const result = moduleBoundary(moduleGraph, files.map(absPath));
     return {
-      content: [{
-        type: "text" as const,
-        text: JSON.stringify({
-          internalEdges: result.internalEdges,
-          incomingEdges: result.incomingEdges.map((e) => ({
-            from: relPath(e.from),
-            to: relPath(e.to),
-            specifiers: e.specifiers,
-          })),
-          outgoingEdges: result.outgoingEdges.map((e) => ({
-            from: relPath(e.from),
-            to: relPath(e.to),
-            specifiers: e.specifiers,
-          })),
-          sharedDependencies: result.sharedDependencies.map(relPath),
-          isolationScore: Math.round(result.isolationScore * 1000) / 1000,
-        }),
-      }],
+      content: [
+        {
+          type: "text" as const,
+          text: JSON.stringify({
+            internalEdges: result.internalEdges,
+            incomingEdges: result.incomingEdges.map((e) => ({
+              from: relPath(e.from),
+              to: relPath(e.to),
+              specifiers: e.specifiers,
+            })),
+            outgoingEdges: result.outgoingEdges.map((e) => ({
+              from: relPath(e.from),
+              to: relPath(e.to),
+              specifiers: e.specifiers,
+            })),
+            sharedDependencies: result.sharedDependencies.map(relPath),
+            isolationScore: Math.round(result.isolationScore * 1000) / 1000,
+          }),
+        },
+      ],
     };
   }
 );
@@ -739,7 +801,7 @@ mcpServer.tool(
 // ─── Start ───────────────────────────────────────────────────────────────────
 
 async function main() {
-  log("Starting ts-nav MCP server...");
+  log("Starting TypeGraph MCP server...");
   log(`Project root: ${projectRoot}`);
   log(`tsconfig: ${tsconfigPath}`);
 
