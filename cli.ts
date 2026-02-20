@@ -3,7 +3,7 @@
  * typegraph-mcp CLI — Setup, verify, and run the TypeGraph MCP server.
  *
  * Usage:
- *   typegraph-mcp setup   Set up typegraph-mcp in the current project
+ *   typegraph-mcp setup   Install typegraph-mcp plugin into the current project
  *   typegraph-mcp check   Run health checks (12 checks)
  *   typegraph-mcp test    Run smoke tests (all 14 tools)
  *   typegraph-mcp start   Start the MCP server (stdin/stdout)
@@ -16,6 +16,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as readline from "node:readline";
+import { execSync } from "node:child_process";
 import { resolveConfig } from "./config.js";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -38,13 +39,46 @@ const AGENT_FILES = [
 
 const SNIPPET_MARKER = "## TypeScript Navigation (typegraph-mcp)";
 
+const PLUGIN_DIR_NAME = "plugins/typegraph-mcp";
+
+/** Files to copy when embedding the plugin into a project */
+const PLUGIN_FILES = [
+  // Plugin manifest & MCP config
+  ".claude-plugin/plugin.json",
+  ".mcp.json",
+  // Hooks & scripts
+  "hooks/hooks.json",
+  "scripts/ensure-deps.sh",
+  // Commands
+  "commands/check.md",
+  "commands/test.md",
+  // Skills
+  "skills/tool-selection/SKILL.md",
+  "skills/impact-analysis/SKILL.md",
+  "skills/refactor-safety/SKILL.md",
+  "skills/dependency-audit/SKILL.md",
+  "skills/code-exploration/SKILL.md",
+  // Server & core modules
+  "server.ts",
+  "module-graph.ts",
+  "tsserver-client.ts",
+  "graph-queries.ts",
+  "config.ts",
+  "check.ts",
+  "smoke-test.ts",
+  "cli.ts",
+  // Package manifest (for dependency install)
+  "package.json",
+  "pnpm-lock.yaml",
+];
+
 const HELP = `
 typegraph-mcp — Type-aware codebase navigation for AI coding agents.
 
 Usage: typegraph-mcp <command> [options]
 
 Commands:
-  setup   Set up typegraph-mcp in the current project
+  setup   Install typegraph-mcp plugin into the current project
   check   Run health checks (12 checks)
   test    Run smoke tests (all 14 tools)
   start   Start the MCP server (stdin/stdout)
@@ -66,20 +100,32 @@ function confirm(question: string): Promise<boolean> {
   });
 }
 
+function copyFile(src: string, dest: string): void {
+  const destDir = path.dirname(dest);
+  if (!fs.existsSync(destDir)) {
+    fs.mkdirSync(destDir, { recursive: true });
+  }
+  fs.copyFileSync(src, dest);
+  // Preserve executable bit for scripts
+  if (src.endsWith(".sh")) {
+    fs.chmodSync(dest, 0o755);
+  }
+}
+
 // ─── Setup Command ───────────────────────────────────────────────────────────
 
 async function setup(yes: boolean): Promise<void> {
-  const toolDir = import.meta.dirname;
+  const sourceDir = import.meta.dirname;
   const projectRoot = process.cwd();
 
   console.log("");
   console.log("typegraph-mcp setup");
   console.log("===================");
   console.log(`Project: ${projectRoot}`);
-  console.log(`Tool:    ${toolDir}`);
+  console.log(`Source:  ${sourceDir}`);
   console.log("");
 
-  // 1. Detect project
+  // 1. Validate project
   const pkgJsonPath = path.resolve(projectRoot, "package.json");
   const tsconfigPath = path.resolve(projectRoot, "tsconfig.json");
 
@@ -98,67 +144,81 @@ async function setup(yes: boolean): Promise<void> {
   console.log("  Found package.json and tsconfig.json");
   console.log("");
 
-  // Determine if tool is embedded or external
-  const toolIsEmbedded = toolDir.startsWith(projectRoot + path.sep);
-  const serverPath = toolIsEmbedded
-    ? "./" + path.relative(projectRoot, path.join(toolDir, "server.ts"))
-    : path.resolve(toolDir, "server.ts");
+  // 2. Embed plugin into project
+  console.log("── Plugin Installation ──────────────────────────────────────");
 
-  // 2. Create/update .claude/mcp.json
-  console.log("── MCP Registration ─────────────────────────────────────────");
+  const targetDir = path.resolve(projectRoot, PLUGIN_DIR_NAME);
+  const isUpdate = fs.existsSync(targetDir);
 
-  const claudeDir = path.resolve(projectRoot, ".claude");
-  const mcpJsonPath = path.resolve(claudeDir, "mcp.json");
+  if (isUpdate && !yes) {
+    const overwrite = await confirm(`  ${PLUGIN_DIR_NAME}/ already exists. Update?`);
+    if (!overwrite) {
+      console.log("  Skipped plugin installation (existing copy preserved)");
+      console.log("");
+      // Still continue with agent instructions and verification
+      await setupAgentInstructions(projectRoot, yes);
+      await runVerification(targetDir);
+      return;
+    }
+  }
 
-  const newEntry = {
-    command: "npx",
-    args: ["tsx", serverPath],
-    env: {
-      TYPEGRAPH_PROJECT_ROOT: ".",
-      TYPEGRAPH_TSCONFIG: "./tsconfig.json",
-    },
-  };
+  // Copy all plugin files
+  let copied = 0;
+  for (const file of PLUGIN_FILES) {
+    const src = path.join(sourceDir, file);
+    const dest = path.join(targetDir, file);
+    if (fs.existsSync(src)) {
+      copyFile(src, dest);
+      copied++;
+    } else {
+      console.log(`  Warning: source file not found: ${file}`);
+    }
+  }
 
-  let mcpJson: { mcpServers?: Record<string, unknown> } = {};
-  let shouldWrite = true;
-  let actionLabel = "Created";
+  console.log(`  ${isUpdate ? "Updated" : "Installed"} ${copied} files to ${PLUGIN_DIR_NAME}/`);
 
+  // 3. Install dependencies
+  console.log("  Installing dependencies...");
+  try {
+    if (fs.existsSync(path.join(targetDir, "pnpm-lock.yaml"))) {
+      execSync("pnpm install --frozen-lockfile 2>/dev/null || pnpm install", {
+        cwd: targetDir,
+        stdio: "pipe",
+      });
+    } else {
+      execSync("npm install", { cwd: targetDir, stdio: "pipe" });
+    }
+    console.log("  Dependencies installed");
+  } catch (err) {
+    console.log(`  Warning: dependency install failed: ${err instanceof Error ? err.message : String(err)}`);
+    console.log("  Run manually: cd " + PLUGIN_DIR_NAME + " && pnpm install");
+  }
+  console.log("");
+
+  // 4. Remove old .claude/mcp.json entry if present (plugin .mcp.json handles registration)
+  const mcpJsonPath = path.resolve(projectRoot, ".claude/mcp.json");
   if (fs.existsSync(mcpJsonPath)) {
     try {
-      mcpJson = JSON.parse(fs.readFileSync(mcpJsonPath, "utf-8"));
+      const mcpJson = JSON.parse(fs.readFileSync(mcpJsonPath, "utf-8"));
       if (mcpJson.mcpServers?.["typegraph"]) {
-        if (!yes) {
-          const overwrite = await confirm("  typegraph entry already exists in .claude/mcp.json. Overwrite?");
-          if (!overwrite) {
-            console.log("  Skipped MCP registration (existing entry preserved)");
-            console.log("");
-            shouldWrite = false;
-          }
-        }
-        actionLabel = "Updated";
-      } else {
-        actionLabel = "Updated";
+        delete mcpJson.mcpServers["typegraph"];
+        fs.writeFileSync(mcpJsonPath, JSON.stringify(mcpJson, null, 2) + "\n");
+        console.log("  Removed old typegraph entry from .claude/mcp.json (plugin handles MCP registration)");
+        console.log("");
       }
     } catch {
-      console.log("  Warning: .claude/mcp.json exists but is invalid JSON. Will overwrite.");
-      mcpJson = {};
+      // Ignore parse errors
     }
   }
 
-  if (shouldWrite) {
-    if (!mcpJson.mcpServers) mcpJson.mcpServers = {};
-    mcpJson.mcpServers["typegraph"] = newEntry;
+  // 5. Agent instructions + plugin-dir line
+  await setupAgentInstructions(projectRoot, yes);
 
-    if (!fs.existsSync(claudeDir)) {
-      fs.mkdirSync(claudeDir, { recursive: true });
-    }
-    fs.writeFileSync(mcpJsonPath, JSON.stringify(mcpJson, null, 2) + "\n");
-    console.log(`  ${actionLabel} .claude/mcp.json`);
-    console.log(`  Server: ${serverPath}`);
-    console.log("");
-  }
+  // 6. Verification
+  await runVerification(targetDir);
+}
 
-  // 3. Append agent instructions
+async function setupAgentInstructions(projectRoot: string, _yes: boolean): Promise<void> {
   console.log("── Agent Instructions ───────────────────────────────────────");
 
   // Find all existing agent files and check which already have the snippet
@@ -176,7 +236,6 @@ async function setup(yes: boolean): Promise<void> {
     console.log("");
     console.log(AGENT_SNIPPET.split("\n").map((l) => "    " + l).join("\n"));
   } else if (existingFiles.some((f) => f.hasSnippet)) {
-    // At least one file already has the snippet — report and skip
     for (const f of existingFiles) {
       if (f.hasSnippet) {
         console.log(`  ${f.file}: already contains typegraph-mcp instructions`);
@@ -185,7 +244,6 @@ async function setup(yes: boolean): Promise<void> {
       }
     }
   } else {
-    // No file has the snippet yet — append to the first one only
     const target = existingFiles[0]!;
     const content = fs.readFileSync(target.path, "utf-8");
     const appendContent = (content.endsWith("\n") ? "" : "\n") + "\n" + AGENT_SNIPPET;
@@ -196,13 +254,35 @@ async function setup(yes: boolean): Promise<void> {
     }
   }
 
-  console.log("");
+  // Update --plugin-dir line in CLAUDE.md if it exists
+  const claudeMdPath = path.resolve(projectRoot, "CLAUDE.md");
+  if (fs.existsSync(claudeMdPath)) {
+    const content = fs.readFileSync(claudeMdPath, "utf-8");
+    const pluginDirPattern = /(`claude\s+)((?:--plugin-dir\s+\S+\s*)+)(`)/;
+    const match = content.match(pluginDirPattern);
 
-  // 4. Run check + test
+    if (match && !match[2]!.includes("./plugins/typegraph-mcp")) {
+      const updated = content.replace(
+        pluginDirPattern,
+        `$1$2--plugin-dir ./plugins/typegraph-mcp $3`
+      );
+      fs.writeFileSync(claudeMdPath, updated);
+      console.log("  CLAUDE.md: added --plugin-dir ./plugins/typegraph-mcp to plugin loading line");
+    } else if (!match) {
+      // No existing --plugin-dir line found — not an error, just skip
+    } else {
+      console.log("  CLAUDE.md: --plugin-dir already includes typegraph-mcp");
+    }
+  }
+
+  console.log("");
+}
+
+async function runVerification(pluginDir: string): Promise<void> {
   console.log("── Verification ─────────────────────────────────────────────");
   console.log("");
 
-  const config = resolveConfig(toolDir);
+  const config = resolveConfig(pluginDir);
 
   const { main: checkMain } = await import("./check.js");
   const checkResult = await checkMain(config);
@@ -220,7 +300,11 @@ async function setup(yes: boolean): Promise<void> {
   console.log("");
 
   if (checkResult.failed === 0 && testResult.failed === 0) {
-    console.log("Setup complete. Restart your agent session to use ts_* tools.");
+    console.log("Setup complete!");
+    console.log("");
+    console.log("  Load the plugin:  claude --plugin-dir ./plugins/typegraph-mcp");
+    console.log("  Or add to your launch command alongside other plugins.");
+    console.log("");
   } else {
     console.log("Setup completed with issues. Fix the failures above and re-run.");
     process.exit(1);

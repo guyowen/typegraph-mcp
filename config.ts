@@ -37,7 +37,7 @@ export function resolveConfig(toolDir: string): TypegraphConfig {
 
   const projectRoot = process.env["TYPEGRAPH_PROJECT_ROOT"]
     ? path.resolve(cwd, process.env["TYPEGRAPH_PROJECT_ROOT"])
-    : path.basename(path.dirname(toolDir)) === "tools"
+    : ["tools", "plugins"].includes(path.basename(path.dirname(toolDir)))
       ? path.resolve(toolDir, "../..")
       : cwd;
 

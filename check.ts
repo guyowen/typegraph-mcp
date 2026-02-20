@@ -183,8 +183,13 @@ export async function main(configOverride?: TypegraphConfig): Promise<CheckResul
   }
 
   // 5. MCP registration
+  // Check for plugin .mcp.json in the tool directory (embedded plugin install)
+  const pluginMcpPath = path.join(toolDir, ".mcp.json");
+  const hasPluginMcp = fs.existsSync(pluginMcpPath) && fs.existsSync(path.join(toolDir, ".claude-plugin/plugin.json"));
   if (process.env.CLAUDE_PLUGIN_ROOT) {
     pass("MCP registered via plugin (CLAUDE_PLUGIN_ROOT set)");
+  } else if (hasPluginMcp) {
+    pass("MCP registered via plugin (.mcp.json + .claude-plugin/ present)");
   } else {
     const mcpJsonPath = path.resolve(projectRoot, ".claude/mcp.json");
     if (fs.existsSync(mcpJsonPath)) {
