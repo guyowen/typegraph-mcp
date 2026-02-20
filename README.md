@@ -43,16 +43,30 @@ Agent: ts_trace_chain({ file: "src/handlers.ts", symbol: "createUser" })
 
 ## Quick start
 
-### 1. Install
+### Option A: CLI setup (recommended)
 
 ```bash
-git clone https://github.com/AltClick/typegraph-mcp.git ~/typegraph-mcp
+# Clone and install
+git clone https://github.com/ojonesjr/typegraph-mcp.git ~/typegraph-mcp
 cd ~/typegraph-mcp && pnpm install
+
+# Run setup from your project root
+cd /path/to/your-ts-project
+npx tsx ~/typegraph-mcp/cli.ts setup
 ```
 
-### 2. Register
+The `setup` command does everything:
+1. Creates/updates `.claude/mcp.json` with the correct server path
+2. Appends agent instructions to `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, or `.github/copilot-instructions.md` (if they exist)
+3. Runs health checks and smoke tests to verify everything works
 
-Add to `.claude/mcp.json` in your project (or `~/.claude/mcp.json` for global):
+Use `--yes` to skip confirmation prompts.
+
+### Option B: Manual setup
+
+If you prefer to configure things yourself:
+
+1. Add to `.claude/mcp.json` in your project (or `~/.claude/mcp.json` for global):
 
 ```json
 {
@@ -69,21 +83,11 @@ Add to `.claude/mcp.json` in your project (or `~/.claude/mcp.json` for global):
 }
 ```
 
+2. Verify with `npx tsx ~/typegraph-mcp/cli.ts check` and `npx tsx ~/typegraph-mcp/cli.ts test`.
+
 `TYPEGRAPH_PROJECT_ROOT` resolves relative to the agent's working directory. Use `"."` for project-local config. The `args` path to `server.ts` must be absolute.
 
-### 3. Verify
-
-```bash
-# Configuration check — are all dependencies and settings correct?
-npx tsx ~/typegraph-mcp/check.ts
-
-# Smoke test — do all 14 tools actually work on your codebase?
-npx tsx ~/typegraph-mcp/smoke-test.ts
-```
-
-`check.ts` validates configuration (12 checks: Node.js, TypeScript, tsconfig, MCP registration, dependencies, etc.). `smoke-test.ts` dynamically discovers a file in your project and exercises all 14 tools against it — graph build, dependency tree, cycle detection, go-to-definition, references, type info, and more. Both should pass.
-
-### 4. Restart your agent session
+### Restart your agent session
 
 First query takes ~2s (tsserver warmup). Subsequent queries: 1–60ms.
 
@@ -92,6 +96,44 @@ First query takes ~2s (tsserver warmup). Subsequent queries: 1–60ms.
 - **Node.js** >= 18
 - **TypeScript** >= 5.0 in the target project (`node_modules`)
 - **pnpm** for installing typegraph-mcp dependencies
+
+## CLI
+
+```
+Usage: typegraph-mcp <command> [options]
+
+Commands:
+  setup   Set up typegraph-mcp in the current project
+  check   Run health checks (12 checks)
+  test    Run smoke tests (all 14 tools)
+  start   Start the MCP server (stdin/stdout)
+
+Options:
+  --yes   Skip confirmation prompts (accept all defaults)
+  --help  Show help
+```
+
+Run any command with:
+
+```bash
+npx tsx ~/typegraph-mcp/cli.ts <command>
+```
+
+### `setup`
+
+One-command project setup. Detects whether typegraph-mcp is embedded inside the project (e.g. `tools/typegraph-mcp/`) or external, and configures paths accordingly. Scans for existing agent instruction files and appends the `ts_*` tools snippet if not already present.
+
+### `check`
+
+Runs 12 health checks: Node.js version, TypeScript installation, tsconfig validity, MCP registration, dependency versions, etc. Every failing check shows a `Fix:` instruction.
+
+### `test`
+
+Exercises all 14 tools against the target project — graph build, dependency tree, cycle detection, go-to-definition, references, type info, and more. Dynamically discovers a file in the project to test against.
+
+### `start`
+
+Starts the MCP server on stdin/stdout. This is what the MCP client calls — you typically don't run this directly.
 
 ## Tools
 
@@ -242,49 +284,6 @@ Works out of the box with TypeScript project references:
 
 Point `TYPEGRAPH_TSCONFIG` at your root `tsconfig.json` that includes all project references.
 
-## Deploying to a new project
-
-### For AI agents setting this up in a new TypeScript project:
-
-1. **Verify prerequisites** in the target project:
-   - `node_modules/typescript/lib/tsserver.js` exists (TypeScript installed)
-   - `tsconfig.json` exists at the project root
-
-2. **Install dependencies** (one-time):
-   ```bash
-   cd /path/to/typegraph-mcp && pnpm install
-   ```
-
-3. **Register the MCP server** — add to `.claude/mcp.json`:
-   ```json
-   {
-     "mcpServers": {
-       "typegraph": {
-         "command": "npx",
-         "args": ["tsx", "/absolute/path/to/typegraph-mcp/server.ts"],
-         "env": {
-           "TYPEGRAPH_PROJECT_ROOT": ".",
-           "TYPEGRAPH_TSCONFIG": "./tsconfig.json"
-         }
-       }
-     }
-   }
-   ```
-
-4. **Run the health check and smoke test**:
-   ```bash
-   npx tsx /path/to/typegraph-mcp/check.ts
-   npx tsx /path/to/typegraph-mcp/smoke-test.ts
-   ```
-   `check.ts` verifies configuration. `smoke-test.ts` exercises all 14 tools against the project. Every failing check shows a `Fix:` instruction.
-
-5. **Add a check script** to the project's `package.json`:
-   ```json
-   "typegraph:check": "tsx /path/to/typegraph-mcp/check.ts && tsx /path/to/typegraph-mcp/smoke-test.ts"
-   ```
-
-6. **Restart the agent session** and test with any `ts_*` tool.
-
 ### ESLint configuration
 
 If typegraph-mcp is embedded inside the project (e.g. `tools/typegraph-mcp/`) and the project uses `typescript-eslint`, add to your ESLint `ignores`:
@@ -316,7 +315,7 @@ Use the `ts_*` MCP tools instead of grep/glob for navigating TypeScript code. Th
 Run the health check first — it catches most issues:
 
 ```bash
-npx tsx /path/to/typegraph-mcp/check.ts
+npx tsx ~/typegraph-mcp/cli.ts check
 ```
 
 | Symptom | Likely cause | Fix |
