@@ -214,13 +214,26 @@ async function setup(yes: boolean): Promise<void> {
 async function setupAgentInstructions(projectRoot: string, _yes: boolean): Promise<void> {
   console.log("── Agent Instructions ───────────────────────────────────────");
 
-  // Find all existing agent files and check which already have the snippet
-  const existingFiles: { file: string; path: string; hasSnippet: boolean }[] = [];
+  // Find all existing agent files, resolve symlinks to deduplicate
+  const seenRealPaths = new Set<string>();
+  const existingFiles: { file: string; realPath: string; isSymlink: boolean; symlinkTarget: string | null; hasSnippet: boolean }[] = [];
   for (const agentFile of AGENT_FILES) {
     const filePath = path.resolve(projectRoot, agentFile);
     if (!fs.existsSync(filePath)) continue;
+    const realPath = fs.realpathSync(filePath);
+    const isSymlink = realPath !== filePath;
+    const symlinkTarget = isSymlink
+      ? AGENT_FILES.find((f) => fs.realpathSync(path.resolve(projectRoot, f)) === realPath && f !== agentFile) ?? null
+      : null;
+
+    if (seenRealPaths.has(realPath)) {
+      // Symlink to a file we've already processed — just report and skip
+      console.log(`  ${agentFile}: symlink to ${symlinkTarget ?? path.relative(projectRoot, realPath)} (skipped)`);
+      continue;
+    }
+    seenRealPaths.add(realPath);
     const content = fs.readFileSync(filePath, "utf-8");
-    existingFiles.push({ file: agentFile, path: filePath, hasSnippet: content.includes(SNIPPET_MARKER) });
+    existingFiles.push({ file: agentFile, realPath, isSymlink, symlinkTarget, hasSnippet: content.includes(SNIPPET_MARKER) });
   }
 
   if (existingFiles.length === 0) {
@@ -238,9 +251,9 @@ async function setupAgentInstructions(projectRoot: string, _yes: boolean): Promi
     }
   } else {
     const target = existingFiles[0]!;
-    const content = fs.readFileSync(target.path, "utf-8");
+    const content = fs.readFileSync(target.realPath, "utf-8");
     const appendContent = (content.endsWith("\n") ? "" : "\n") + "\n" + AGENT_SNIPPET;
-    fs.appendFileSync(target.path, appendContent);
+    fs.appendFileSync(target.realPath, appendContent);
     console.log(`  ${target.file}: appended typegraph-mcp instructions`);
     for (const f of existingFiles.slice(1)) {
       console.log(`  ${f.file}: skipped (instructions added to ${target.file})`);
