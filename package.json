@@ -10,9 +10,9 @@
     "zod": "^4.3.6"
   },
   "scripts": {
-    "start": "npx tsx server.ts",
-    "test": "npx tsx test-tools.ts",
-    "check": "npx tsx check.ts"
+    "start": "tsx server.ts",
+    "test": "tsx test-tools.ts",
+    "check": "tsx check.ts"
   },
   "devDependencies": {
     "@types/node": "^25.3.0"

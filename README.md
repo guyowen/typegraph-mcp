@@ -21,7 +21,7 @@ Measured against a real monorepo: **99% context token reduction** compared to gr
 ```bash
 git clone <this-repo> ~/tools/ts-nav-mcp
 cd ~/tools/ts-nav-mcp
-npm install
+pnpm install
 ```
 
 ### 2. Register with your AI agent
@@ -219,7 +219,7 @@ Key design choices:
 
 3. **Install the MCP server** dependencies (one-time):
    ```bash
-   cd /path/to/ts-nav-mcp && npm install
+   cd /path/to/ts-nav-mcp && pnpm install
    ```
 
 4. **Register the MCP server** — add to `.claude/mcp.json` in the target project root (or `~/.claude/mcp.json` for global):
@@ -272,7 +272,7 @@ If the MCP server fails to start or tools return errors:
 1. Run the health check: `npx tsx /path/to/ts-nav-mcp/check.ts`
 2. Each failing check shows a `Fix:` instruction — follow them in order
 3. Common issues:
-   - **Dependencies not installed**: `cd /path/to/ts-nav-mcp && npm install`
+   - **Dependencies not installed**: `cd /path/to/ts-nav-mcp && pnpm install`
    - **TypeScript not found**: the target project needs `typescript` as a dependency
    - **tsconfig.json missing**: create one or update `TS_NAV_TSCONFIG` to point to the correct path
    - **MCP registration wrong**: verify the `args` path to `server.ts` is absolute and correct

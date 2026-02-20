@@ -6,7 +6,7 @@
  *   npx tsx tools/ts-nav-mcp/check.ts
  *
  * Or from tools/ts-nav-mcp/:
- *   npm run check
+ *   pnpm check
  */
 
 import * as fs from "node:fs";
@@ -176,13 +176,13 @@ async function main() {
     } else {
       fail(
         `Missing packages: ${missing.join(", ")}`,
-        "Run `cd tools/ts-nav-mcp && npm install`"
+        "Run `cd tools/ts-nav-mcp && pnpm install`"
       );
     }
   } else {
     fail(
       "ts-nav-mcp dependencies not installed",
-      "Run `cd tools/ts-nav-mcp && npm install`"
+      "Run `cd tools/ts-nav-mcp && pnpm install`"
     );
   }
 
@@ -196,13 +196,13 @@ async function main() {
     } else {
       fail(
         "oxc-parser parseSync returned unexpected result",
-        "Reinstall: `cd tools/ts-nav-mcp && rm -rf node_modules && npm install`"
+        "Reinstall: `cd tools/ts-nav-mcp && rm -rf node_modules && pnpm install`"
       );
     }
   } catch (err) {
     fail(
       `oxc-parser failed: ${err instanceof Error ? err.message : String(err)}`,
-      "Reinstall: `cd tools/ts-nav-mcp && rm -rf node_modules && npm install`"
+      "Reinstall: `cd tools/ts-nav-mcp && rm -rf node_modules && pnpm install`"
     );
   }
 
@@ -237,7 +237,7 @@ async function main() {
   } catch (err) {
     fail(
       `oxc-resolver failed: ${err instanceof Error ? err.message : String(err)}`,
-      "Reinstall: `cd tools/ts-nav-mcp && rm -rf node_modules && npm install`"
+      "Reinstall: `cd tools/ts-nav-mcp && rm -rf node_modules && pnpm install`"
     );
   }
 
