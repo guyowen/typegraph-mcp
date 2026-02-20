@@ -326,6 +326,43 @@ npx tsx /path/to/typegraph-mcp/check.ts
 | Tools return empty results | tsconfig misconfigured | Check `TYPEGRAPH_TSCONFIG` points to the right file |
 | MCP registration not found | Wrong path in config | Verify the `args` path to `server.ts` is absolute |
 
+## Benchmarking
+
+Run the benchmark suite to measure typegraph-mcp vs grep on your codebase:
+
+```bash
+npx tsx benchmark.ts
+
+# Or against a different project:
+TYPEGRAPH_PROJECT_ROOT=/path/to/project npx tsx benchmark.ts
+```
+
+The benchmark is fully dynamic — it discovers test scenarios from the module graph rather than using hardcoded symbols, so it works on any TypeScript project.
+
+### What it measures
+
+| Benchmark | What it tests |
+|---|---|
+| **Token comparison** | Context tokens consumed: grep (read all matching files) vs typegraph (structured JSON response) |
+| **Latency** | Per-tool timing (p50, p95, avg) across 5 runs for all 14 tools |
+| **Accuracy** | Qualitative comparison across 5 scenarios (barrel resolution, disambiguation, type-only imports, impact analysis, cycle detection) |
+
+### Dynamic scenario discovery
+
+Each scenario is discovered from the project's import graph — no hardcoded symbols or paths:
+
+| Discovery function | What it finds |
+|---|---|
+| `findBarrelChain` | An `index.ts` that re-exports named specifiers from a non-index file |
+| `findHighFanoutSymbol` | The most-imported symbol by frequency across all edges |
+| `findPrefixSymbol` | A symbol whose name is a prefix of others (e.g. `Auth` vs `AuthLive`) |
+| `findMixedImportFile` | A file with both `import type` and runtime imports |
+| `findMostDependedFile` | The file with the most reverse edges (most depended-on) |
+| `findChainFile` | A file with a traceable multi-hop import chain |
+| `findLatencyTestFile` | A medium-sized service/handler file suitable for latency testing |
+
+Scenarios that can't be found in the target codebase are gracefully skipped.
+
 ## Known limitations
 
 - **Object literal property keys** (e.g., RPC handler names) are not indexed by tsserver's `navto`. Use `ts_find_symbol` with a specific file, or pass the `file` hint to `ts_navigate_to`.
