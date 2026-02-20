@@ -3,9 +3,9 @@
  * typegraph-mcp Health Check — Verifies all setup requirements are met.
  *
  * Run from project root:
- *   npx tsx tools/typegraph-mcp/check.ts
+ *   npx tsx plugins/typegraph-mcp/check.ts
  *
- * Or from tools/typegraph-mcp/:
+ * Or from plugins/typegraph-mcp/:
  *   pnpm check
  */
 
@@ -368,7 +368,7 @@ export async function main(configOverride?: TypegraphConfig): Promise<CheckResul
     const eslintConfigPath = path.resolve(projectRoot, "eslint.config.mjs");
     if (fs.existsSync(eslintConfigPath)) {
       const eslintContent = fs.readFileSync(eslintConfigPath, "utf-8");
-      // Determine the parent directory (e.g. "tools" or "plugins") for the ignore pattern
+      // Determine the parent directory (e.g. "plugins") for the ignore pattern
       const parentDir = path.basename(path.dirname(toolDir));
       const parentIgnorePattern = new RegExp(`["']${parentDir}\\/\\*\\*["']`);
       const hasParentIgnore = parentIgnorePattern.test(eslintContent);

@@ -138,7 +138,7 @@ npx tsx ~/typegraph-mcp/cli.ts <command>
 
 ### `setup`
 
-One-command project setup. Detects whether typegraph-mcp is embedded inside the project (e.g. `tools/typegraph-mcp/`) or external, and configures paths accordingly. Scans for existing agent instruction files and appends the `ts_*` tools snippet if not already present.
+One-command project setup. Copies the plugin into `./plugins/typegraph-mcp/`, installs dependencies, appends agent instructions to the first agent file found, and updates the `--plugin-dir` line in CLAUDE.md if present.
 
 ### `check`
 
@@ -327,12 +327,11 @@ Point `TYPEGRAPH_TSCONFIG` at your root `tsconfig.json` that includes all projec
 
 ### ESLint configuration
 
-If typegraph-mcp is embedded inside the project (e.g. `tools/typegraph-mcp/`) and the project uses `typescript-eslint`, add to your ESLint `ignores`:
+If typegraph-mcp is installed as a plugin (e.g. `plugins/typegraph-mcp/`) and the project uses `typescript-eslint`, add to your ESLint `ignores`:
 
 ```javascript
 ignores: [
-  "tools/**",
-  ".typegraph-test/**",
+  "plugins/**",
 ]
 ```
 

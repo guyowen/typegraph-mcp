@@ -5,7 +5,7 @@
  * Dynamically discovers files and symbols from whatever project it's pointed at.
  *
  * Run from project root:
- *   npx tsx tools/typegraph-mcp/smoke-test.ts
+ *   npx tsx plugins/typegraph-mcp/smoke-test.ts
  *
  * Or pointing at a project:
  *   TYPEGRAPH_PROJECT_ROOT=/path/to/project npx tsx /path/to/typegraph-mcp/smoke-test.ts
