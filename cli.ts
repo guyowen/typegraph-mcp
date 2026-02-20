@@ -19,6 +19,22 @@ import * as readline from "node:readline";
 import { execSync } from "node:child_process";
 import { resolveConfig } from "./config.js";
 
+// ─── Types ───────────────────────────────────────────────────────────────────
+
+type AgentId = "claude-code" | "cursor" | "codex" | "gemini" | "copilot";
+
+interface AgentDef {
+  name: string;
+  /** Files to include in the plugin directory (agent-specific) */
+  pluginFiles: string[];
+  /** Agent instruction file to update (null if agent has no instruction file) */
+  agentFile: string | null;
+  /** Whether this agent discovers skills from .agents/skills/ at project root */
+  needsAgentsSkills: boolean;
+  /** Detect if this agent is likely in use based on project files */
+  detect: (projectRoot: string) => boolean;
+}
+
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const AGENT_SNIPPET = `
@@ -30,45 +46,62 @@ Use the \`ts_*\` MCP tools instead of grep/glob for navigating TypeScript code. 
 - **Graph queries** (import graph): \`ts_dependency_tree\`, \`ts_dependents\`, \`ts_import_cycles\`, \`ts_shortest_path\`, \`ts_subgraph\`, \`ts_module_boundary\`
 `.trimStart();
 
-const AGENT_FILES = [
-  "CLAUDE.md",
-  "AGENTS.md",
-  "GEMINI.md",
-  ".github/copilot-instructions.md",
-];
-
 const SNIPPET_MARKER = "## TypeScript Navigation (typegraph-mcp)";
 
 const PLUGIN_DIR_NAME = "plugins/typegraph-mcp";
 
-/** Files to copy when embedding the plugin into a project */
-const PLUGIN_FILES = [
-  // Claude Code plugin
-  ".claude-plugin/plugin.json",
-  ".mcp.json",
-  // Cursor plugin
-  ".cursor-plugin/plugin.json",
-  // Gemini CLI extension
-  "gemini-extension.json",
-  // Hooks & scripts
-  "hooks/hooks.json",
-  "scripts/ensure-deps.sh",
-  // Commands (Claude Code)
-  "commands/check.md",
-  "commands/test.md",
-  // Skills (Claude Code + Cursor discover from skills/)
-  "skills/tool-selection/SKILL.md",
-  "skills/impact-analysis/SKILL.md",
-  "skills/refactor-safety/SKILL.md",
-  "skills/dependency-audit/SKILL.md",
-  "skills/code-exploration/SKILL.md",
-  // Skills (Codex, Gemini, Copilot discover from .agents/skills/)
-  ".agents/skills/tool-selection/SKILL.md",
-  ".agents/skills/impact-analysis/SKILL.md",
-  ".agents/skills/refactor-safety/SKILL.md",
-  ".agents/skills/dependency-audit/SKILL.md",
-  ".agents/skills/code-exploration/SKILL.md",
-  // Server & core modules
+const AGENT_IDS: AgentId[] = ["claude-code", "cursor", "codex", "gemini", "copilot"];
+
+const AGENTS: Record<AgentId, AgentDef> = {
+  "claude-code": {
+    name: "Claude Code",
+    pluginFiles: [
+      ".claude-plugin/plugin.json",
+      ".mcp.json",
+      "hooks/hooks.json",
+      "scripts/ensure-deps.sh",
+      "commands/check.md",
+      "commands/test.md",
+    ],
+    agentFile: "CLAUDE.md",
+    needsAgentsSkills: false,
+    detect: (root) =>
+      fs.existsSync(path.join(root, "CLAUDE.md")) ||
+      fs.existsSync(path.join(root, ".claude")),
+  },
+  cursor: {
+    name: "Cursor",
+    pluginFiles: [".cursor-plugin/plugin.json"],
+    agentFile: null,
+    needsAgentsSkills: false,
+    detect: (root) => fs.existsSync(path.join(root, ".cursor")),
+  },
+  codex: {
+    name: "Codex CLI",
+    pluginFiles: [],
+    agentFile: "AGENTS.md",
+    needsAgentsSkills: true,
+    detect: (root) => fs.existsSync(path.join(root, "AGENTS.md")),
+  },
+  gemini: {
+    name: "Gemini CLI",
+    pluginFiles: ["gemini-extension.json"],
+    agentFile: "GEMINI.md",
+    needsAgentsSkills: true,
+    detect: (root) => fs.existsSync(path.join(root, "GEMINI.md")),
+  },
+  copilot: {
+    name: "GitHub Copilot",
+    pluginFiles: [],
+    agentFile: ".github/copilot-instructions.md",
+    needsAgentsSkills: true,
+    detect: (root) =>
+      fs.existsSync(path.join(root, ".github/copilot-instructions.md")),
+  },
+};
+
+/** Core files always installed (server, modules, config, package manifest) */
+const CORE_FILES = [
   "server.ts",
   "module-graph.ts",
   "tsserver-client.ts",
@@ -77,9 +110,34 @@ const PLUGIN_FILES = [
   "check.ts",
   "smoke-test.ts",
   "cli.ts",
-  // Package manifest (for dependency install)
   "package.json",
   "pnpm-lock.yaml",
+];
+
+/** Skill files inside plugin dir (Claude Code + Cursor discover from skills/) */
+const SKILL_FILES = [
+  "skills/tool-selection/SKILL.md",
+  "skills/impact-analysis/SKILL.md",
+  "skills/refactor-safety/SKILL.md",
+  "skills/dependency-audit/SKILL.md",
+  "skills/code-exploration/SKILL.md",
+];
+
+/** .agents/skills/ copies inside plugin dir (source for project-root copies) */
+const AGENTS_SKILL_FILES = [
+  ".agents/skills/tool-selection/SKILL.md",
+  ".agents/skills/impact-analysis/SKILL.md",
+  ".agents/skills/refactor-safety/SKILL.md",
+  ".agents/skills/dependency-audit/SKILL.md",
+  ".agents/skills/code-exploration/SKILL.md",
+];
+
+const SKILL_NAMES = [
+  "tool-selection",
+  "impact-analysis",
+  "refactor-safety",
+  "dependency-audit",
+  "code-exploration",
 ];
 
 const HELP = `
@@ -110,6 +168,16 @@ function confirm(question: string): Promise<boolean> {
   });
 }
 
+function prompt(question: string): Promise<string> {
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  return new Promise((resolve) => {
+    rl.question(question, (answer) => {
+      rl.close();
+      resolve(answer.trim());
+    });
+  });
+}
+
 function copyFile(src: string, dest: string): void {
   const destDir = path.dirname(dest);
   if (!fs.existsSync(destDir)) {
@@ -120,6 +188,70 @@ function copyFile(src: string, dest: string): void {
   if (src.endsWith(".sh")) {
     fs.chmodSync(dest, 0o755);
   }
+}
+
+// ─── Agent Selection ─────────────────────────────────────────────────────────
+
+function detectAgents(projectRoot: string): AgentId[] {
+  return AGENT_IDS.filter((id) => AGENTS[id].detect(projectRoot));
+}
+
+async function selectAgents(projectRoot: string, yes: boolean): Promise<AgentId[]> {
+  const detected = detectAgents(projectRoot);
+
+  if (yes) {
+    const selected = detected.length > 0 ? detected : [...AGENT_IDS];
+    console.log("── Agent Selection ──────────────────────────────────────────");
+    console.log("");
+    console.log(`  Auto-selected: ${selected.map((id) => AGENTS[id].name).join(", ")}`);
+    console.log("");
+    return selected;
+  }
+
+  console.log("── Agent Selection ──────────────────────────────────────────");
+  console.log("");
+  console.log("  Select which AI agents to configure:");
+  console.log("");
+
+  for (let i = 0; i < AGENT_IDS.length; i++) {
+    const id = AGENT_IDS[i]!;
+    const agent = AGENTS[id];
+    const isDetected = detected.includes(id);
+    const marker = isDetected ? " (detected)" : "";
+    const num = `${i + 1}.`.padEnd(3);
+    console.log(`    ${num} ${agent.name.padEnd(16)}${marker}`);
+  }
+
+  console.log("");
+
+  const defaultNums = detected.map((id) => AGENT_IDS.indexOf(id) + 1);
+  const defaultStr = defaultNums.length > 0 ? defaultNums.join(",") : "all";
+
+  const answer = await prompt(`  Enter numbers (e.g. 1,3,5), 'all', or Enter for [${defaultStr}]: `);
+
+  let selected: AgentId[];
+
+  if (answer === "") {
+    selected = detected.length > 0 ? detected : [...AGENT_IDS];
+  } else if (answer.toLowerCase() === "all") {
+    selected = [...AGENT_IDS];
+  } else {
+    const nums = answer
+      .split(/[,\s]+/)
+      .map(Number)
+      .filter((n) => n >= 1 && n <= AGENT_IDS.length);
+    if (nums.length === 0) {
+      console.log("  No valid selections — using detected agents.");
+      selected = detected.length > 0 ? detected : [...AGENT_IDS];
+    } else {
+      selected = [...new Set(nums.map((n) => AGENT_IDS[n - 1]!))];
+    }
+  }
+
+  console.log(`  Selected: ${selected.map((id) => AGENTS[id].name).join(", ")}`);
+  console.log("");
+
+  return selected;
 }
 
 // ─── Setup Command ───────────────────────────────────────────────────────────
@@ -154,7 +286,13 @@ async function setup(yes: boolean): Promise<void> {
   console.log("  Found package.json and tsconfig.json");
   console.log("");
 
-  // 2. Embed plugin into project
+  // 2. Agent selection
+  const selectedAgents = await selectAgents(projectRoot, yes);
+
+  const needsPluginSkills = selectedAgents.includes("claude-code") || selectedAgents.includes("cursor");
+  const needsAgentsSkills = selectedAgents.some((id) => AGENTS[id].needsAgentsSkills);
+
+  // 3. Build file list and embed plugin into project
   console.log("── Plugin Installation ──────────────────────────────────────");
 
   const targetDir = path.resolve(projectRoot, PLUGIN_DIR_NAME);
@@ -165,16 +303,31 @@ async function setup(yes: boolean): Promise<void> {
     if (!overwrite) {
       console.log("  Skipped plugin installation (existing copy preserved)");
       console.log("");
-      // Still continue with agent instructions and verification
-      await setupAgentInstructions(projectRoot, yes);
-      await runVerification(targetDir);
+      await setupAgentInstructions(projectRoot, selectedAgents);
+      await runVerification(targetDir, selectedAgents);
       return;
     }
   }
 
-  // Copy all plugin files
+  // Assemble file list based on selected agents
+  const filesToCopy = [...CORE_FILES];
+
+  // Skills are always needed (either for in-plugin discovery or as source for .agents/skills/ copies)
+  if (needsPluginSkills || needsAgentsSkills) {
+    filesToCopy.push(...SKILL_FILES);
+  }
+  if (needsAgentsSkills) {
+    filesToCopy.push(...AGENTS_SKILL_FILES);
+  }
+
+  // Add agent-specific files
+  for (const agentId of selectedAgents) {
+    filesToCopy.push(...AGENTS[agentId].pluginFiles);
+  }
+
+  // Copy files
   let copied = 0;
-  for (const file of PLUGIN_FILES) {
+  for (const file of filesToCopy) {
     const src = path.join(sourceDir, file);
     const dest = path.join(targetDir, file);
     if (fs.existsSync(src)) {
@@ -187,7 +340,7 @@ async function setup(yes: boolean): Promise<void> {
 
   console.log(`  ${isUpdate ? "Updated" : "Installed"} ${copied} files to ${PLUGIN_DIR_NAME}/`);
 
-  // 3. Install dependencies (use npm to avoid pnpm workspace interference)
+  // 4. Install dependencies (use npm to avoid pnpm workspace interference)
   console.log("  Installing dependencies...");
   try {
     execSync("npm install", { cwd: targetDir, stdio: "pipe" });
@@ -198,63 +351,78 @@ async function setup(yes: boolean): Promise<void> {
   }
   console.log("");
 
-  // 4. Copy skills to .agents/skills/ for cross-platform discovery (Codex, Gemini, Copilot)
-  console.log("── Cross-Platform Skills ────────────────────────────────────");
-  const agentsSkillsDir = path.resolve(projectRoot, ".agents/skills");
-  const skillNames = ["tool-selection", "impact-analysis", "refactor-safety", "dependency-audit", "code-exploration"];
-  let copiedSkills = 0;
-  for (const skill of skillNames) {
-    const src = path.join(targetDir, "skills", skill, "SKILL.md");
-    const destDir = path.join(agentsSkillsDir, skill);
-    const dest = path.join(destDir, "SKILL.md");
-    if (!fs.existsSync(src)) continue;
-    if (fs.existsSync(dest)) {
-      // Check if content matches — skip if identical
-      const srcContent = fs.readFileSync(src, "utf-8");
-      const destContent = fs.readFileSync(dest, "utf-8");
-      if (srcContent === destContent) continue;
-    }
-    fs.mkdirSync(destDir, { recursive: true });
-    fs.copyFileSync(src, dest);
-    copiedSkills++;
-  }
-  if (copiedSkills > 0) {
-    console.log(`  Copied ${copiedSkills} skills to .agents/skills/ (Codex, Gemini, Copilot)`);
-  } else {
-    console.log("  .agents/skills/ already up to date");
-  }
-  console.log("");
+  // 5. Copy skills to .agents/skills/ for cross-platform discovery
+  if (needsAgentsSkills) {
+    const agentsNames = selectedAgents
+      .filter((id) => AGENTS[id].needsAgentsSkills)
+      .map((id) => AGENTS[id].name);
 
-  // 5. Remove old .claude/mcp.json entry if present (plugin .mcp.json handles registration)
-  const mcpJsonPath = path.resolve(projectRoot, ".claude/mcp.json");
-  if (fs.existsSync(mcpJsonPath)) {
-    try {
-      const mcpJson = JSON.parse(fs.readFileSync(mcpJsonPath, "utf-8"));
-      if (mcpJson.mcpServers?.["typegraph"]) {
-        delete mcpJson.mcpServers["typegraph"];
-        fs.writeFileSync(mcpJsonPath, JSON.stringify(mcpJson, null, 2) + "\n");
-        console.log("  Removed old typegraph entry from .claude/mcp.json (plugin handles MCP registration)");
-        console.log("");
+    console.log("── Cross-Platform Skills ────────────────────────────────────");
+    const agentsSkillsDir = path.resolve(projectRoot, ".agents/skills");
+    let copiedSkills = 0;
+    for (const skill of SKILL_NAMES) {
+      const src = path.join(targetDir, "skills", skill, "SKILL.md");
+      const destDir = path.join(agentsSkillsDir, skill);
+      const dest = path.join(destDir, "SKILL.md");
+      if (!fs.existsSync(src)) continue;
+      if (fs.existsSync(dest)) {
+        const srcContent = fs.readFileSync(src, "utf-8");
+        const destContent = fs.readFileSync(dest, "utf-8");
+        if (srcContent === destContent) continue;
       }
-    } catch {
-      // Ignore parse errors
+      fs.mkdirSync(destDir, { recursive: true });
+      fs.copyFileSync(src, dest);
+      copiedSkills++;
+    }
+    if (copiedSkills > 0) {
+      console.log(`  Copied ${copiedSkills} skills to .agents/skills/ (${agentsNames.join(", ")})`);
+    } else {
+      console.log("  .agents/skills/ already up to date");
+    }
+    console.log("");
+  }
+
+  // 6. Remove old .claude/mcp.json entry if Claude Code is selected
+  if (selectedAgents.includes("claude-code")) {
+    const mcpJsonPath = path.resolve(projectRoot, ".claude/mcp.json");
+    if (fs.existsSync(mcpJsonPath)) {
+      try {
+        const mcpJson = JSON.parse(fs.readFileSync(mcpJsonPath, "utf-8"));
+        if (mcpJson.mcpServers?.["typegraph"]) {
+          delete mcpJson.mcpServers["typegraph"];
+          fs.writeFileSync(mcpJsonPath, JSON.stringify(mcpJson, null, 2) + "\n");
+          console.log("  Removed old typegraph entry from .claude/mcp.json (plugin handles MCP registration)");
+          console.log("");
+        }
+      } catch {
+        // Ignore parse errors
+      }
     }
   }
 
-  // 5. Agent instructions + plugin-dir line
-  await setupAgentInstructions(projectRoot, yes);
+  // 7. Agent instructions
+  await setupAgentInstructions(projectRoot, selectedAgents);
 
-  // 6. Verification
-  await runVerification(targetDir);
+  // 8. Verification
+  await runVerification(targetDir, selectedAgents);
 }
 
-async function setupAgentInstructions(projectRoot: string, _yes: boolean): Promise<void> {
+async function setupAgentInstructions(projectRoot: string, selectedAgents: AgentId[]): Promise<void> {
+  // Collect agent instruction files for selected agents
+  const agentFiles = selectedAgents
+    .map((id) => AGENTS[id].agentFile)
+    .filter((f): f is string => f !== null);
+
+  if (agentFiles.length === 0) {
+    return; // No agents with instruction files selected (e.g. Cursor only)
+  }
+
   console.log("── Agent Instructions ───────────────────────────────────────");
 
-  // Find all existing agent files, resolve symlinks to deduplicate
+  // Find existing files, resolve symlinks to deduplicate
   const seenRealPaths = new Map<string, string>(); // realPath -> first agentFile name
   const existingFiles: { file: string; realPath: string; hasSnippet: boolean }[] = [];
-  for (const agentFile of AGENT_FILES) {
+  for (const agentFile of agentFiles) {
     const filePath = path.resolve(projectRoot, agentFile);
     if (!fs.existsSync(filePath)) continue;
     const realPath = fs.realpathSync(filePath);
@@ -270,7 +438,7 @@ async function setupAgentInstructions(projectRoot: string, _yes: boolean): Promi
   }
 
   if (existingFiles.length === 0) {
-    console.log("  No agent instruction files found (CLAUDE.md, AGENTS.md, GEMINI.md, etc.)");
+    console.log(`  No agent instruction files found (${agentFiles.join(", ")})`);
     console.log("  Add this snippet to your agent instructions file:");
     console.log("");
     console.log(AGENT_SNIPPET.split("\n").map((l) => "    " + l).join("\n"));
@@ -293,33 +461,34 @@ async function setupAgentInstructions(projectRoot: string, _yes: boolean): Promi
     }
   }
 
-  // Update --plugin-dir line in CLAUDE.md if it exists
-  const claudeMdPath = path.resolve(projectRoot, "CLAUDE.md");
-  if (fs.existsSync(claudeMdPath)) {
-    let content = fs.readFileSync(claudeMdPath, "utf-8");
-    const pluginDirPattern = /(`claude\s+)((?:--plugin-dir\s+\S+\s*)+)(`)/;
-    const match = content.match(pluginDirPattern);
+  // Update --plugin-dir line in CLAUDE.md if Claude Code is selected
+  if (selectedAgents.includes("claude-code")) {
+    const claudeMdPath = path.resolve(projectRoot, "CLAUDE.md");
+    if (fs.existsSync(claudeMdPath)) {
+      let content = fs.readFileSync(claudeMdPath, "utf-8");
+      const pluginDirPattern = /(`claude\s+)((?:--plugin-dir\s+\S+\s*)+)(`)/;
+      const match = content.match(pluginDirPattern);
 
-    if (match && !match[2]!.includes("./plugins/typegraph-mcp")) {
-      // Ensure the existing flags end with a space before appending
-      const existingFlags = match[2]!.trimEnd();
-      content = content.replace(
-        pluginDirPattern,
-        `$1${existingFlags} --plugin-dir ./plugins/typegraph-mcp$3`
-      );
-      fs.writeFileSync(claudeMdPath, content);
-      console.log("  CLAUDE.md: added --plugin-dir ./plugins/typegraph-mcp to plugin loading line");
-    } else if (!match) {
-      // No existing --plugin-dir line found — not an error, just skip
-    } else {
-      console.log("  CLAUDE.md: --plugin-dir already includes typegraph-mcp");
+      if (match && !match[2]!.includes("./plugins/typegraph-mcp")) {
+        const existingFlags = match[2]!.trimEnd();
+        content = content.replace(
+          pluginDirPattern,
+          `$1${existingFlags} --plugin-dir ./plugins/typegraph-mcp$3`
+        );
+        fs.writeFileSync(claudeMdPath, content);
+        console.log("  CLAUDE.md: added --plugin-dir ./plugins/typegraph-mcp to plugin loading line");
+      } else if (!match) {
+        // No existing --plugin-dir line found — not an error, just skip
+      } else {
+        console.log("  CLAUDE.md: --plugin-dir already includes typegraph-mcp");
+      }
     }
   }
 
   console.log("");
 }
 
-async function runVerification(pluginDir: string): Promise<void> {
+async function runVerification(pluginDir: string, selectedAgents: AgentId[]): Promise<void> {
   console.log("── Verification ─────────────────────────────────────────────");
   console.log("");
 
@@ -343,8 +512,12 @@ async function runVerification(pluginDir: string): Promise<void> {
   if (checkResult.failed === 0 && testResult.failed === 0) {
     console.log("Setup complete!");
     console.log("");
-    console.log("  Load the plugin:  claude --plugin-dir ./plugins/typegraph-mcp");
-    console.log("  Or add to your launch command alongside other plugins.");
+    if (selectedAgents.includes("claude-code")) {
+      console.log("  Load the plugin:  claude --plugin-dir ./plugins/typegraph-mcp");
+      console.log("  Or add to your launch command alongside other plugins.");
+    } else {
+      console.log("  The typegraph-mcp tools are now available to your selected agents.");
+    }
     console.log("");
   } else {
     console.log("Setup completed with issues. Fix the failures above and re-run.");
