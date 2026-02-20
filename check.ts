@@ -13,59 +13,126 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { createRequire } from "node:module";
 import { spawn } from "node:child_process";
+import { resolveConfig, type TypegraphConfig } from "./config.js";
 
-// ─── Configuration ───────────────────────────────────────────────────────────
+// ─── Result Type ─────────────────────────────────────────────────────────────
 
-// Tool directory is wherever this script lives
-const toolDir = import.meta.dirname;
-
-// Detect project root:
-//   1. TYPEGRAPH_PROJECT_ROOT env var (explicit)
-//   2. If check.ts is inside tools/typegraph-mcp/, go up two levels
-//   3. Otherwise, use cwd (standalone deployment, run from target project)
-const cwd = process.cwd();
-const projectRoot = process.env["TYPEGRAPH_PROJECT_ROOT"]
-  ? path.resolve(cwd, process.env["TYPEGRAPH_PROJECT_ROOT"])
-  : path.basename(path.dirname(toolDir)) === "tools"
-    ? path.resolve(toolDir, "../..")
-    : cwd;
-
-const tsconfigPath = process.env["TYPEGRAPH_TSCONFIG"] || "./tsconfig.json";
-
-// Is typegraph-mcp embedded inside the project (e.g. tools/typegraph-mcp/)?
-const toolIsEmbedded = toolDir.startsWith(projectRoot + path.sep);
-const toolRelPath = toolIsEmbedded ? path.relative(projectRoot, toolDir) : toolDir;
-
-// ─── Test Harness ────────────────────────────────────────────────────────────
-
-let passed = 0;
-let failed = 0;
-let warned = 0;
-
-function pass(msg: string): void {
-  console.log(`  \u2713 ${msg}`);
-  passed++;
+export interface CheckResult {
+  passed: number;
+  failed: number;
+  warned: number;
 }
 
-function fail(msg: string, fix: string): void {
-  console.log(`  \u2717 ${msg}`);
-  console.log(`    Fix: ${fix}`);
-  failed++;
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+/** Find first .ts file in the project (for resolver smoke test) */
+function findFirstTsFile(dir: string): string | null {
+  const skipDirs = new Set(["node_modules", "dist", ".git", ".wrangler", "coverage"]);
+  try {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (entry.isFile() && entry.name.endsWith(".ts") && !entry.name.endsWith(".d.ts")) {
+        return path.join(dir, entry.name);
+      }
+    }
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (entry.isDirectory() && !skipDirs.has(entry.name) && !entry.name.startsWith(".")) {
+        const found = findFirstTsFile(path.join(dir, entry.name));
+        if (found) return found;
+      }
+    }
+  } catch {
+    // Permission error or similar
+  }
+  return null;
 }
 
-function warn(msg: string, note: string): void {
-  console.log(`  ! ${msg}`);
-  console.log(`    ${note}`);
-  warned++;
+/** Spawn tsserver, send configure, verify response, shut down */
+function testTsserver(projectRoot: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    let tsserverPath: string;
+    try {
+      const require = createRequire(path.resolve(projectRoot, "package.json"));
+      tsserverPath = require.resolve("typescript/lib/tsserver.js");
+    } catch {
+      resolve(false);
+      return;
+    }
+
+    const child = spawn("node", [tsserverPath, "--disableAutomaticTypingAcquisition"], {
+      cwd: projectRoot,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+
+    const timeout = setTimeout(() => {
+      child.kill();
+      resolve(false);
+    }, 10000);
+
+    let buffer = "";
+    child.stdout.on("data", (chunk: { toString(): string }) => {
+      buffer += chunk.toString();
+      // tsserver sends Content-Length framed JSON — look for success response
+      if (buffer.includes('"success":true')) {
+        clearTimeout(timeout);
+        child.kill();
+        resolve(true);
+      }
+    });
+
+    child.on("error", () => {
+      clearTimeout(timeout);
+      resolve(false);
+    });
+
+    child.on("exit", () => {
+      clearTimeout(timeout);
+      // If we haven't resolved yet, it failed
+    });
+
+    // Send configure request (newline-delimited JSON, not Content-Length framed)
+    const request = JSON.stringify({
+      seq: 1,
+      type: "request",
+      command: "configure",
+      arguments: {
+        preferences: { disableSuggestions: true },
+      },
+    });
+    child.stdin.write(request + "\n");
+  });
 }
 
-function skip(msg: string): void {
-  console.log(`  - ${msg} (skipped)`);
-}
+// ─── Main ────────────────────────────────────────────────────────────────────
 
-// ─── Checks ──────────────────────────────────────────────────────────────────
+export async function main(configOverride?: TypegraphConfig): Promise<CheckResult> {
+  const { projectRoot, tsconfigPath, toolDir, toolIsEmbedded, toolRelPath } =
+    configOverride ?? resolveConfig(import.meta.dirname);
 
-async function main() {
+  let passed = 0;
+  let failed = 0;
+  let warned = 0;
+
+  function pass(msg: string): void {
+    console.log(`  \u2713 ${msg}`);
+    passed++;
+  }
+
+  function fail(msg: string, fix: string): void {
+    console.log(`  \u2717 ${msg}`);
+    console.log(`    Fix: ${fix}`);
+    failed++;
+  }
+
+  function warn(msg: string, note: string): void {
+    console.log(`  ! ${msg}`);
+    console.log(`    ${note}`);
+    warned++;
+  }
+
+  function skip(msg: string): void {
+    console.log(`  - ${msg} (skipped)`);
+  }
+
   console.log("");
   console.log("typegraph-mcp Health Check");
   console.log("=======================");
@@ -210,7 +277,6 @@ async function main() {
       extensions: [".ts", ".tsx", ".js"],
       extensionAlias: { ".js": [".ts", ".tsx", ".js"] },
     });
-    // Try to resolve the tsconfig itself as a sanity check
     // Find any .ts file in the project to test resolution
     let resolveOk = false;
     const testFile = findFirstTsFile(projectRoot);
@@ -239,7 +305,7 @@ async function main() {
   // 9. tsserver startup test
   if (tsVersion) {
     try {
-      const ok = await testTsserver();
+      const ok = await testTsserver(projectRoot);
       if (ok) {
         pass("tsserver responds to configure");
       } else {
@@ -366,92 +432,20 @@ async function main() {
   }
   console.log("");
 
-  process.exit(failed > 0 ? 1 : 0);
+  return { passed, failed, warned };
 }
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+// ─── Self-run guard ──────────────────────────────────────────────────────────
 
-/** Find first .ts file in the project (for resolver smoke test) */
-function findFirstTsFile(dir: string): string | null {
-  const skipDirs = new Set(["node_modules", "dist", ".git", ".wrangler", "coverage"]);
-  try {
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      if (entry.isFile() && entry.name.endsWith(".ts") && !entry.name.endsWith(".d.ts")) {
-        return path.join(dir, entry.name);
-      }
-    }
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      if (entry.isDirectory() && !skipDirs.has(entry.name) && !entry.name.startsWith(".")) {
-        const found = findFirstTsFile(path.join(dir, entry.name));
-        if (found) return found;
-      }
-    }
-  } catch {
-    // Permission error or similar
-  }
-  return null;
+const isDirectRun =
+  process.argv[1] &&
+  fs.realpathSync(process.argv[1]) === fs.realpathSync(new URL(import.meta.url).pathname);
+
+if (isDirectRun) {
+  main()
+    .then((result) => process.exit(result.failed > 0 ? 1 : 0))
+    .catch((err) => {
+      console.error("Fatal error:", err);
+      process.exit(1);
+    });
 }
-
-/** Spawn tsserver, send configure, verify response, shut down */
-function testTsserver(): Promise<boolean> {
-  return new Promise((resolve) => {
-    const timeout = setTimeout(() => {
-      child.kill();
-      resolve(false);
-    }, 10000);
-
-    let tsserverPath: string;
-    try {
-      const require = createRequire(path.resolve(projectRoot, "package.json"));
-      tsserverPath = require.resolve("typescript/lib/tsserver.js");
-    } catch {
-      clearTimeout(timeout);
-      resolve(false);
-      return;
-    }
-
-    const child = spawn("node", [tsserverPath, "--disableAutomaticTypingAcquisition"], {
-      cwd: projectRoot,
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-
-    let buffer = "";
-    child.stdout.on("data", (chunk: { toString(): string }) => {
-      buffer += chunk.toString();
-      // tsserver sends Content-Length framed JSON — look for success response
-      if (buffer.includes('"success":true')) {
-        clearTimeout(timeout);
-        child.kill();
-        resolve(true);
-      }
-    });
-
-    child.on("error", () => {
-      clearTimeout(timeout);
-      resolve(false);
-    });
-
-    child.on("exit", () => {
-      clearTimeout(timeout);
-      // If we haven't resolved yet, it failed
-    });
-
-    // Send configure request (newline-delimited JSON, not Content-Length framed)
-    const request = JSON.stringify({
-      seq: 1,
-      type: "request",
-      command: "configure",
-      arguments: {
-        preferences: { disableSuggestions: true },
-      },
-    });
-    child.stdin.write(request + "\n");
-  });
-}
-
-// ─── Run ─────────────────────────────────────────────────────────────────────
-
-main().catch((err) => {
-  console.error("Fatal error:", err);
-  process.exit(1);
-});

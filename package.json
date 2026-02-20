@@ -1,18 +1,26 @@
 {
   "name": "typegraph-mcp",
   "version": "1.0.0",
-  "private": true,
+  "description": "Type-aware codebase navigation for AI coding agents — 14 MCP tools powered by tsserver + oxc",
   "type": "module",
+  "bin": {
+    "typegraph-mcp": "./cli.ts",
+    "typegraph": "./cli.ts"
+  },
+  "files": [
+    "*.ts",
+    "README.md"
+  ],
+  "scripts": {
+    "start": "tsx server.ts",
+    "test": "tsx smoke-test.ts",
+    "check": "tsx check.ts"
+  },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.26.0",
     "oxc-parser": "^0.114.0",
     "oxc-resolver": "^11.17.1",
     "zod": "^4.3.6"
-  },
-  "scripts": {
-    "start": "tsx server.ts",
-    "test": "tsx smoke-test.ts",
-    "check": "tsx check.ts"
   },
   "devDependencies": {
     "@types/node": "^25.3.0"

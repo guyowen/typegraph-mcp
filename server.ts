@@ -30,11 +30,11 @@ import {
 } from "./graph-queries.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { resolveConfig } from "./config.js";
 
 // ─── Configuration ───────────────────────────────────────────────────────────
 
-const projectRoot = process.env["TYPEGRAPH_PROJECT_ROOT"] || process.cwd();
-const tsconfigPath = process.env["TYPEGRAPH_TSCONFIG"] || "./tsconfig.json";
+const { projectRoot, tsconfigPath } = resolveConfig(import.meta.dirname);
 
 const log = (...args: unknown[]) => console.error("[typegraph]", ...args);
 

@@ -23,44 +23,19 @@ import {
   subgraph,
   moduleBoundary,
 } from "./graph-queries.js";
+import { resolveConfig, type TypegraphConfig } from "./config.js";
 
-// ─── Configuration ───────────────────────────────────────────────────────────
+// ─── Result Type ─────────────────────────────────────────────────────────────
 
-const toolDir = import.meta.dirname;
-const cwd = process.cwd();
-const projectRoot = process.env["TYPEGRAPH_PROJECT_ROOT"]
-  ? path.resolve(cwd, process.env["TYPEGRAPH_PROJECT_ROOT"])
-  : path.basename(path.dirname(toolDir)) === "tools"
-    ? path.resolve(toolDir, "../..")
-    : cwd;
-const tsconfigPath = process.env["TYPEGRAPH_TSCONFIG"] || "./tsconfig.json";
-
-// ─── Test Harness ────────────────────────────────────────────────────────────
-
-let passed = 0;
-let failed = 0;
-let skipped = 0;
-
-function pass(name: string, detail: string, ms: number): void {
-  console.log(`  \u2713 ${name} [${ms.toFixed(0)}ms]`);
-  console.log(`    ${detail}`);
-  passed++;
-}
-
-function fail(name: string, detail: string, ms: number): void {
-  console.log(`  \u2717 ${name} [${ms.toFixed(0)}ms]`);
-  console.log(`    ${detail}`);
-  failed++;
-}
-
-function skip(name: string, reason: string): void {
-  console.log(`  - ${name} (skipped: ${reason})`);
-  skipped++;
+export interface SmokeTestResult {
+  passed: number;
+  failed: number;
+  skipped: number;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function rel(absPath: string): string {
+function rel(absPath: string, projectRoot: string): string {
   return path.relative(projectRoot, absPath);
 }
 
@@ -144,7 +119,31 @@ function findImporter(graph: ModuleGraph, file: string): string | null {
 
 // ─── Main ────────────────────────────────────────────────────────────────────
 
-async function main() {
+export async function main(configOverride?: TypegraphConfig): Promise<SmokeTestResult> {
+  const { projectRoot, tsconfigPath } =
+    configOverride ?? resolveConfig(import.meta.dirname);
+
+  let passed = 0;
+  let failed = 0;
+  let skipped = 0;
+
+  function pass(name: string, detail: string, ms: number): void {
+    console.log(`  \u2713 ${name} [${ms.toFixed(0)}ms]`);
+    console.log(`    ${detail}`);
+    passed++;
+  }
+
+  function fail(name: string, detail: string, ms: number): void {
+    console.log(`  \u2717 ${name} [${ms.toFixed(0)}ms]`);
+    console.log(`    ${detail}`);
+    failed++;
+  }
+
+  function skip(name: string, reason: string): void {
+    console.log(`  - ${name} (skipped: ${reason})`);
+    skipped++;
+  }
+
   console.log("");
   console.log("typegraph-mcp Smoke Test");
   console.log("=====================");
@@ -156,9 +155,9 @@ async function main() {
   const testFile = findTestFile(projectRoot);
   if (!testFile) {
     console.log("  No suitable .ts file found in project. Cannot run smoke tests.");
-    process.exit(1);
+    return { passed, failed: failed + 1, skipped };
   }
-  const testFileRel = rel(testFile);
+  const testFileRel = rel(testFile, projectRoot);
   console.log(`Test subject: ${testFileRel}`);
   console.log("");
 
@@ -181,7 +180,7 @@ async function main() {
     } else {
       fail("graph build", "0 files discovered", ms);
       console.log("\nCannot continue without module graph.");
-      process.exit(1);
+      return { passed, failed, skipped };
     }
   } catch (err) {
     fail(
@@ -190,7 +189,7 @@ async function main() {
       performance.now() - t0
     );
     console.log("\nCannot continue without module graph.");
-    process.exit(1);
+    return { passed, failed, skipped };
   }
 
   // dependency_tree
@@ -231,9 +230,9 @@ async function main() {
     const result = shortestPath(graph, importer, testFile);
     const ms = performance.now() - t0;
     if (result.path) {
-      pass("shortest_path", `${result.hops} hops: ${result.path.map(rel).join(" -> ")}`, ms);
+      pass("shortest_path", `${result.hops} hops: ${result.path.map((p) => rel(p, projectRoot)).join(" -> ")}`, ms);
     } else {
-      pass("shortest_path", `No path from ${rel(importer)} (may be type-only)`, ms);
+      pass("shortest_path", `No path from ${rel(importer, projectRoot)} (may be type-only)`, ms);
     }
   } else {
     skip("shortest_path", "No importer found for test file");
@@ -260,11 +259,11 @@ async function main() {
     const result = moduleBoundary(graph, siblings);
     pass(
       "module_boundary",
-      `${siblings.length} files in ${rel(dir)}/: ${result.internalEdges} internal, ${result.incomingEdges.length} in, ${result.outgoingEdges.length} out`,
+      `${siblings.length} files in ${rel(dir, projectRoot)}/: ${result.internalEdges} internal, ${result.incomingEdges.length} in, ${result.outgoingEdges.length} out`,
       performance.now() - t0
     );
   } else {
-    skip("module_boundary", `Only ${siblings.length} file(s) in ${rel(dir)}/`);
+    skip("module_boundary", `Only ${siblings.length} file(s) in ${rel(dir, projectRoot)}/`);
   }
 
   // ─── tsserver (8 tools) ─────────────────────────────────────────────────
@@ -482,10 +481,20 @@ async function main() {
   }
   console.log("");
 
-  process.exit(failed > 0 ? 1 : 0);
+  return { passed, failed, skipped };
 }
 
-main().catch((err) => {
-  console.error("Fatal:", err);
-  process.exit(1);
-});
+// ─── Self-run guard ──────────────────────────────────────────────────────────
+
+const isDirectRun =
+  process.argv[1] &&
+  fs.realpathSync(process.argv[1]) === fs.realpathSync(new URL(import.meta.url).pathname);
+
+if (isDirectRun) {
+  main()
+    .then((result) => process.exit(result.failed > 0 ? 1 : 0))
+    .catch((err) => {
+      console.error("Fatal:", err);
+      process.exit(1);
+    });
+}
