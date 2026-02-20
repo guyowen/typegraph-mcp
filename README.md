@@ -60,7 +60,7 @@ The plugin auto-configures everything:
 - `/typegraph:check` and `/typegraph:test` commands available in-session
 - SessionStart hook verifies dependencies are installed
 
-### Option B: CLI setup (for non-Claude Code agents)
+### Option B: CLI setup (all agents)
 
 ```bash
 # Clone and install
@@ -72,12 +72,15 @@ cd /path/to/your-ts-project
 npx tsx ~/typegraph-mcp/cli.ts setup
 ```
 
-The `setup` command does everything:
-1. Creates/updates `.claude/mcp.json` with the correct server path
-2. Appends agent instructions to `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, or `.github/copilot-instructions.md` (if they exist)
-3. Runs health checks and smoke tests to verify everything works
+The interactive `setup` command:
+1. Auto-detects which AI agents you use (Claude Code, Cursor, Codex CLI, Gemini CLI, GitHub Copilot)
+2. Copies the plugin into `./plugins/typegraph-mcp/` and installs dependencies
+3. Registers the MCP server in each agent's config file (`.mcp.json`, `.cursor/mcp.json`, `.codex/config.toml`, `.vscode/mcp.json`)
+4. Copies workflow skills to `.agents/skills/` for agents that discover them there
+5. Appends agent instructions to `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, or `.github/copilot-instructions.md`
+6. Runs health checks and smoke tests to verify everything works
 
-Use `--yes` to skip confirmation prompts.
+Use `--yes` to skip prompts and auto-select detected agents.
 
 ### Option C: Manual setup
 
@@ -112,7 +115,7 @@ First query takes ~2s (tsserver warmup). Subsequent queries: 1–60ms.
 
 - **Node.js** >= 18
 - **TypeScript** >= 5.0 in the target project (`node_modules`)
-- **pnpm** for installing typegraph-mcp dependencies
+- **pnpm** (or npm) for installing typegraph-mcp dependencies
 
 ## CLI
 
@@ -120,10 +123,11 @@ First query takes ~2s (tsserver warmup). Subsequent queries: 1–60ms.
 Usage: typegraph-mcp <command> [options]
 
 Commands:
-  setup   Set up typegraph-mcp in the current project
-  check   Run health checks (12 checks)
-  test    Run smoke tests (all 14 tools)
-  start   Start the MCP server (stdin/stdout)
+  setup    Install typegraph-mcp plugin into the current project
+  remove   Uninstall typegraph-mcp from the current project
+  check    Run health checks (12 checks)
+  test     Run smoke tests (all 14 tools)
+  start    Start the MCP server (stdin/stdout)
 
 Options:
   --yes   Skip confirmation prompts (accept all defaults)
@@ -138,7 +142,11 @@ npx tsx ~/typegraph-mcp/cli.ts <command>
 
 ### `setup`
 
-One-command project setup. Copies the plugin into `./plugins/typegraph-mcp/`, installs dependencies, appends agent instructions to the first agent file found, and updates the `--plugin-dir` line in CLAUDE.md if present.
+Interactive project setup. Detects which AI agents you use, copies the plugin into `./plugins/typegraph-mcp/`, registers the MCP server in each agent's config, installs dependencies, and runs verification. If an existing installation is detected, offers Update/Remove/Exit.
+
+### `remove`
+
+Cleanly uninstalls typegraph-mcp from the project: removes the plugin directory, deregisters the MCP server from all agent configs (`.cursor/mcp.json`, `.codex/config.toml`, `.vscode/mcp.json`), strips agent instruction snippets, and cleans up `.agents/skills/`.
 
 ### `check`
 
