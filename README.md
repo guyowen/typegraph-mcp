@@ -74,10 +74,14 @@ Add to `.claude/mcp.json` in your project (or `~/.claude/mcp.json` for global):
 ### 3. Verify
 
 ```bash
+# Configuration check — are all dependencies and settings correct?
 npx tsx ~/ts-nav-mcp/check.ts
+
+# Smoke test — do all 14 tools actually work on your codebase?
+npx tsx ~/ts-nav-mcp/smoke-test.ts
 ```
 
-Runs 12 checks (Node.js, TypeScript, tsconfig, MCP registration, dependencies, oxc-parser, oxc-resolver, tsserver, module graph, and more). All should pass.
+`check.ts` validates configuration (12 checks: Node.js, TypeScript, tsconfig, MCP registration, dependencies, etc.). `smoke-test.ts` dynamically discovers a file in your project and exercises all 14 tools against it — graph build, dependency tree, cycle detection, go-to-definition, references, type info, and more. Both should pass.
 
 ### 4. Restart your agent session
 
@@ -267,11 +271,12 @@ Point `TS_NAV_TSCONFIG` at your root `tsconfig.json` that includes all project r
    }
    ```
 
-4. **Run the health check**:
+4. **Run the health check and smoke test**:
    ```bash
    npx tsx /path/to/ts-nav-mcp/check.ts
+   npx tsx /path/to/ts-nav-mcp/smoke-test.ts
    ```
-   Every failing check shows a `Fix:` instruction. Follow them in order.
+   `check.ts` verifies configuration. `smoke-test.ts` exercises all 14 tools against the project. Every failing check shows a `Fix:` instruction.
 
 5. **Restart the agent session** and test with any `ts_*` tool.
 
