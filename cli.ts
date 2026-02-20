@@ -215,25 +215,21 @@ async function setupAgentInstructions(projectRoot: string, _yes: boolean): Promi
   console.log("── Agent Instructions ───────────────────────────────────────");
 
   // Find all existing agent files, resolve symlinks to deduplicate
-  const seenRealPaths = new Set<string>();
-  const existingFiles: { file: string; realPath: string; isSymlink: boolean; symlinkTarget: string | null; hasSnippet: boolean }[] = [];
+  const seenRealPaths = new Map<string, string>(); // realPath -> first agentFile name
+  const existingFiles: { file: string; realPath: string; hasSnippet: boolean }[] = [];
   for (const agentFile of AGENT_FILES) {
     const filePath = path.resolve(projectRoot, agentFile);
     if (!fs.existsSync(filePath)) continue;
     const realPath = fs.realpathSync(filePath);
-    const isSymlink = realPath !== filePath;
-    const symlinkTarget = isSymlink
-      ? AGENT_FILES.find((f) => fs.realpathSync(path.resolve(projectRoot, f)) === realPath && f !== agentFile) ?? null
-      : null;
 
-    if (seenRealPaths.has(realPath)) {
-      // Symlink to a file we've already processed — just report and skip
-      console.log(`  ${agentFile}: symlink to ${symlinkTarget ?? path.relative(projectRoot, realPath)} (skipped)`);
+    const previousFile = seenRealPaths.get(realPath);
+    if (previousFile) {
+      console.log(`  ${agentFile}: same file as ${previousFile} (skipped)`);
       continue;
     }
-    seenRealPaths.add(realPath);
+    seenRealPaths.set(realPath, agentFile);
     const content = fs.readFileSync(filePath, "utf-8");
-    existingFiles.push({ file: agentFile, realPath, isSymlink, symlinkTarget, hasSnippet: content.includes(SNIPPET_MARKER) });
+    existingFiles.push({ file: agentFile, realPath, hasSnippet: content.includes(SNIPPET_MARKER) });
   }
 
   if (existingFiles.length === 0) {
