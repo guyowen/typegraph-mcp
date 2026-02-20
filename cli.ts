@@ -36,7 +36,7 @@ const AGENT_FILES = [
   ".github/copilot-instructions.md",
 ];
 
-const SNIPPET_MARKER = "typegraph-mcp";
+const SNIPPET_MARKER = "## TypeScript Navigation (typegraph-mcp)";
 
 const HELP = `
 typegraph-mcp — Type-aware codebase navigation for AI coding agents.
@@ -161,34 +161,39 @@ async function setup(yes: boolean): Promise<void> {
   // 3. Append agent instructions
   console.log("── Agent Instructions ───────────────────────────────────────");
 
-  let anyFileUpdated = false;
-  let anyFileFound = false;
-
+  // Find all existing agent files and check which already have the snippet
+  const existingFiles: { file: string; path: string; hasSnippet: boolean }[] = [];
   for (const agentFile of AGENT_FILES) {
     const filePath = path.resolve(projectRoot, agentFile);
     if (!fs.existsSync(filePath)) continue;
-
-    anyFileFound = true;
     const content = fs.readFileSync(filePath, "utf-8");
-
-    if (content.includes(SNIPPET_MARKER)) {
-      console.log(`  ${agentFile}: already contains typegraph-mcp instructions`);
-      continue;
-    }
-
-    const appendContent = (content.endsWith("\n") ? "" : "\n") + "\n" + AGENT_SNIPPET;
-    fs.appendFileSync(filePath, appendContent);
-    console.log(`  ${agentFile}: appended typegraph-mcp instructions`);
-    anyFileUpdated = true;
+    existingFiles.push({ file: agentFile, path: filePath, hasSnippet: content.includes(SNIPPET_MARKER) });
   }
 
-  if (!anyFileFound) {
+  if (existingFiles.length === 0) {
     console.log("  No agent instruction files found (CLAUDE.md, AGENTS.md, GEMINI.md, etc.)");
     console.log("  Add this snippet to your agent instructions file:");
     console.log("");
     console.log(AGENT_SNIPPET.split("\n").map((l) => "    " + l).join("\n"));
-  } else if (!anyFileUpdated) {
-    console.log("  All agent files already have typegraph-mcp instructions");
+  } else if (existingFiles.some((f) => f.hasSnippet)) {
+    // At least one file already has the snippet — report and skip
+    for (const f of existingFiles) {
+      if (f.hasSnippet) {
+        console.log(`  ${f.file}: already contains typegraph-mcp instructions`);
+      } else {
+        console.log(`  ${f.file}: skipped (instructions already in another file)`);
+      }
+    }
+  } else {
+    // No file has the snippet yet — append to the first one only
+    const target = existingFiles[0]!;
+    const content = fs.readFileSync(target.path, "utf-8");
+    const appendContent = (content.endsWith("\n") ? "" : "\n") + "\n" + AGENT_SNIPPET;
+    fs.appendFileSync(target.path, appendContent);
+    console.log(`  ${target.file}: appended typegraph-mcp instructions`);
+    for (const f of existingFiles.slice(1)) {
+      console.log(`  ${f.file}: skipped (instructions added to ${target.file})`);
+    }
   }
 
   console.log("");
