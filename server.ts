@@ -1,10 +1,11 @@
 #!/usr/bin/env npx tsx
 /**
- * TS Nav MCP Server — Type-aware codebase navigation for AI coding agents.
+ * TS Nav MCP Server — Type-aware codebase navigation for Claude Code.
  *
  * Bridges MCP protocol (stdin/stdout) to tsserver (child process pipes).
- * Provides 8 tools for definition, references, type info, symbol search,
- * call chain tracing, blast radius analysis, and module export inspection.
+ * Provides 14 tools for definition, references, type info, symbol search,
+ * call chain tracing, blast radius analysis, module export inspection,
+ * and module graph queries (dependency trees, cycles, paths, boundaries).
  *
  * Usage:
  *   npx tsx server.ts
@@ -18,7 +19,17 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { TsServerClient, type NavBarItem } from "./tsserver-client.js";
+import { buildGraph, startWatcher, type ModuleGraph } from "./module-graph.js";
+import {
+  dependencyTree,
+  dependents,
+  importCycles,
+  shortestPath,
+  subgraph,
+  moduleBoundary,
+} from "./graph-queries.js";
 import * as fs from "node:fs";
+import * as path from "node:path";
 
 // ─── Configuration ───────────────────────────────────────────────────────────
 
@@ -30,6 +41,9 @@ const log = (...args: unknown[]) => console.error("[ts-nav]", ...args);
 // ─── Initialize ──────────────────────────────────────────────────────────────
 
 const client = new TsServerClient(projectRoot, tsconfigPath);
+
+// Module graph — initialized in main(), used by graph tools
+let moduleGraph: ModuleGraph;
 
 const mcpServer = new McpServer({
   name: "ts-nav",
@@ -537,6 +551,191 @@ mcpServer.tool(
   }
 );
 
+// ─── Graph Tool Helpers ─────────────────────────────────────────────────────
+
+/** Convert an absolute path to project-relative */
+function relPath(absPath: string): string {
+  return path.relative(projectRoot, absPath);
+}
+
+/** Convert a relative or absolute path to absolute */
+function absPath(file: string): string {
+  return path.isAbsolute(file) ? file : path.resolve(projectRoot, file);
+}
+
+// ─── Tool 9: ts_dependency_tree ─────────────────────────────────────────────
+
+mcpServer.tool(
+  "ts_dependency_tree",
+  "Get the transitive dependency tree (imports) of a file. Shows what a file depends on, directly and transitively.",
+  {
+    file: z.string().describe("File to analyze (relative or absolute path)"),
+    depth: z.number().int().positive().optional().describe("Max traversal depth (default: unlimited)"),
+    includeTypeOnly: z.boolean().optional().default(false).describe("Include type-only imports (default: false)"),
+  },
+  async ({ file, depth, includeTypeOnly }) => {
+    const result = dependencyTree(moduleGraph, absPath(file), { depth, includeTypeOnly });
+    return {
+      content: [{
+        type: "text" as const,
+        text: JSON.stringify({
+          root: relPath(result.root),
+          nodes: result.nodes,
+          files: result.files.map(relPath),
+        }),
+      }],
+    };
+  }
+);
+
+// ─── Tool 10: ts_dependents ─────────────────────────────────────────────────
+
+mcpServer.tool(
+  "ts_dependents",
+  "Find all files that depend on (import) a given file, directly and transitively. Groups results by package.",
+  {
+    file: z.string().describe("File to analyze (relative or absolute path)"),
+    depth: z.number().int().positive().optional().describe("Max traversal depth (default: unlimited)"),
+    includeTypeOnly: z.boolean().optional().default(false).describe("Include type-only imports (default: false)"),
+  },
+  async ({ file, depth, includeTypeOnly }) => {
+    const result = dependents(moduleGraph, absPath(file), { depth, includeTypeOnly });
+    const byPackageRel: Record<string, string[]> = {};
+    for (const [pkg, files] of Object.entries(result.byPackage)) {
+      byPackageRel[pkg] = files.map(relPath);
+    }
+    return {
+      content: [{
+        type: "text" as const,
+        text: JSON.stringify({
+          root: relPath(result.root),
+          nodes: result.nodes,
+          directCount: result.directCount,
+          files: result.files.map(relPath),
+          byPackage: byPackageRel,
+        }),
+      }],
+    };
+  }
+);
+
+// ─── Tool 11: ts_import_cycles ──────────────────────────────────────────────
+
+mcpServer.tool(
+  "ts_import_cycles",
+  "Detect circular import dependencies in the project. Returns strongly connected components (cycles) in the import graph.",
+  {
+    file: z.string().optional().describe("Filter to cycles containing this file"),
+    package: z.string().optional().describe("Filter to cycles within this directory"),
+  },
+  async ({ file, package: pkg }) => {
+    const result = importCycles(moduleGraph, {
+      file: file ? absPath(file) : undefined,
+      package: pkg ? absPath(pkg) : undefined,
+    });
+    return {
+      content: [{
+        type: "text" as const,
+        text: JSON.stringify({
+          count: result.count,
+          cycles: result.cycles.map((cycle) => cycle.map(relPath)),
+        }),
+      }],
+    };
+  }
+);
+
+// ─── Tool 12: ts_shortest_path ──────────────────────────────────────────────
+
+mcpServer.tool(
+  "ts_shortest_path",
+  "Find the shortest import path between two files. Shows how one module reaches another through the import graph.",
+  {
+    from: z.string().describe("Source file (relative or absolute path)"),
+    to: z.string().describe("Target file (relative or absolute path)"),
+    includeTypeOnly: z.boolean().optional().default(false).describe("Include type-only imports (default: false)"),
+  },
+  async ({ from, to, includeTypeOnly }) => {
+    const result = shortestPath(moduleGraph, absPath(from), absPath(to), { includeTypeOnly });
+    return {
+      content: [{
+        type: "text" as const,
+        text: JSON.stringify({
+          path: result.path?.map(relPath) ?? null,
+          hops: result.hops,
+          chain: result.chain.map((c) => ({
+            file: relPath(c.file),
+            imports: c.imports,
+          })),
+        }),
+      }],
+    };
+  }
+);
+
+// ─── Tool 13: ts_subgraph ───────────────────────────────────────────────────
+
+mcpServer.tool(
+  "ts_subgraph",
+  "Extract a subgraph around seed files. Expands by depth hops in the specified direction (imports, dependents, or both).",
+  {
+    files: z.array(z.string()).describe("Seed files to expand from (relative or absolute paths)"),
+    depth: z.number().int().positive().optional().default(1).describe("Hops to expand (default: 1)"),
+    direction: z.enum(["imports", "dependents", "both"]).optional().default("both").describe("Direction to expand (default: both)"),
+  },
+  async ({ files, depth, direction }) => {
+    const result = subgraph(moduleGraph, files.map(absPath), { depth, direction });
+    return {
+      content: [{
+        type: "text" as const,
+        text: JSON.stringify({
+          nodes: result.nodes.map(relPath),
+          edges: result.edges.map((e) => ({
+            from: relPath(e.from),
+            to: relPath(e.to),
+            specifiers: e.specifiers,
+            isTypeOnly: e.isTypeOnly,
+          })),
+          stats: result.stats,
+        }),
+      }],
+    };
+  }
+);
+
+// ─── Tool 14: ts_module_boundary ────────────────────────────────────────────
+
+mcpServer.tool(
+  "ts_module_boundary",
+  "Analyze the boundary of a set of files: incoming/outgoing edges, shared dependencies, and an isolation score. Useful for understanding module coupling.",
+  {
+    files: z.array(z.string()).describe("Files defining the module boundary (relative or absolute paths)"),
+  },
+  async ({ files }) => {
+    const result = moduleBoundary(moduleGraph, files.map(absPath));
+    return {
+      content: [{
+        type: "text" as const,
+        text: JSON.stringify({
+          internalEdges: result.internalEdges,
+          incomingEdges: result.incomingEdges.map((e) => ({
+            from: relPath(e.from),
+            to: relPath(e.to),
+            specifiers: e.specifiers,
+          })),
+          outgoingEdges: result.outgoingEdges.map((e) => ({
+            from: relPath(e.from),
+            to: relPath(e.to),
+            specifiers: e.specifiers,
+          })),
+          sharedDependencies: result.sharedDependencies.map(relPath),
+          isolationScore: Math.round(result.isolationScore * 1000) / 1000,
+        }),
+      }],
+    };
+  }
+);
+
 // ─── Start ───────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -544,7 +743,14 @@ async function main() {
   log(`Project root: ${projectRoot}`);
   log(`tsconfig: ${tsconfigPath}`);
 
-  await client.start();
+  // Start tsserver and build module graph concurrently
+  const [, graphResult] = await Promise.all([
+    client.start(),
+    buildGraph(projectRoot, tsconfigPath),
+  ]);
+
+  moduleGraph = graphResult.graph;
+  startWatcher(projectRoot, moduleGraph, graphResult.resolver);
 
   const transport = new StdioServerTransport();
   await mcpServer.connect(transport);

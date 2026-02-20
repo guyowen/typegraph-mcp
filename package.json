@@ -1,23 +1,19 @@
 {
   "name": "ts-nav-mcp",
   "version": "1.0.0",
-  "description": "MCP server for type-aware TypeScript codebase navigation. Gives AI coding agents go-to-definition, find-references, type-info, and more via tsserver.",
   "private": true,
   "type": "module",
-  "license": "MIT",
-  "keywords": [
-    "mcp",
-    "typescript",
-    "tsserver",
-    "navigation",
-    "claude-code",
-    "ai-agent"
-  ],
-  "scripts": {
-    "start": "npx tsx server.ts"
-  },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.26.0",
+    "oxc-parser": "^0.60.0",
+    "oxc-resolver": "^7.0.0",
     "zod": "^3.24.0"
+  },
+  "scripts": {
+    "start": "npx tsx server.ts",
+    "test": "npx tsx test-tools.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^25.3.0"
   }
 }

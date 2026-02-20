@@ -1,6 +1,6 @@
 # ts-nav-mcp
 
-MCP server that gives AI coding agents type-aware TypeScript codebase navigation — go-to-definition, find-references, type info, and more — powered by `tsserver` (the same engine VS Code uses).
+MCP server that gives AI coding agents type-aware TypeScript codebase navigation — go-to-definition, find-references, type info, dependency graphs, cycle detection, and more — powered by `tsserver` and `oxc-parser`.
 
 ## Why
 
@@ -128,21 +128,76 @@ Input:  { file: "src/services/Auth.ts" }
 Output: { file, exports: [{ symbol, kind, line, type }], count }
 ```
 
+### `ts_dependency_tree`
+Get the transitive dependency tree (imports) of a file. Shows what a file depends on, directly and transitively.
+
+```
+Input:  { file: "src/handlers.ts", depth: 3, includeTypeOnly: false }
+Output: { root, nodes: 42, files: ["src/utils.ts", ...] }
+```
+
+### `ts_dependents`
+Find all files that depend on (import) a given file, directly and transitively. Groups results by package.
+
+```
+Input:  { file: "src/schemas/ids.ts" }
+Output: { root, nodes: 155, directCount: 31, files: [...], byPackage: { "@my/core": [...], ... } }
+```
+
+### `ts_import_cycles`
+Detect circular import dependencies in the project. Returns strongly connected components (cycles) in the import graph.
+
+```
+Input:  { file: "src/services/Auth.ts" }  // optional filter
+Output: { count: 1, cycles: [["src/a.ts", "src/b.ts"]] }
+```
+
+### `ts_shortest_path`
+Find the shortest import path between two files. Shows how one module reaches another through the import graph.
+
+```
+Input:  { from: "src/handlers.ts", to: "src/schemas/ids.ts" }
+Output: { path: ["src/handlers.ts", "src/schemas/index.ts", "src/schemas/ids.ts"], hops: 2, chain: [...] }
+```
+
+### `ts_subgraph`
+Extract a subgraph around seed files. Expands by depth hops in the specified direction (imports, dependents, or both).
+
+```
+Input:  { files: ["src/services/Auth.ts"], depth: 1, direction: "both" }
+Output: { nodes: [...], edges: [{ from, to, specifiers, isTypeOnly }], stats: { nodeCount, edgeCount } }
+```
+
+### `ts_module_boundary`
+Analyze the boundary of a set of files: incoming/outgoing edges, shared dependencies, and an isolation score. Useful for understanding module coupling before refactoring.
+
+```
+Input:  { files: ["src/schemas/ids.ts", "src/schemas/queue.ts", ...] }
+Output: { internalEdges: 8, incomingEdges: [...], outgoingEdges: [...], sharedDependencies: [...], isolationScore: 0.058 }
+```
+
 ## Architecture
 
 ```
-AI Agent ─── stdin/stdout ─── MCP Server (server.ts) ─── pipe ─── tsserver (child)
-              MCP protocol                                tsserver protocol
+AI Agent ─── stdin/stdout ─── MCP Server (server.ts) ─┬── pipe ─── tsserver (child)
+              MCP protocol                             │              tsserver protocol
+                                                       └── module-graph.ts (oxc-parser + oxc-resolver)
+                                                                      import graph
 ```
 
-The server is a single Node.js process. MCP communication happens on the parent's stdin/stdout, while tsserver runs as a child process communicating over pipes using tsserver's Content-Length framed JSON protocol.
+The server is a single Node.js process with two subsystems initialized concurrently at startup:
+
+1. **tsserver** — child process for type-aware point queries (definition, references, type info). Communicates over pipes using tsserver's Content-Length framed JSON protocol.
+2. **Module graph** — in-process import graph built with `oxc-parser` (fast NAPI parser) and `oxc-resolver` (tsconfig-aware resolution). Provides structural queries (dependency trees, cycles, paths, boundaries). Incrementally updated via `fs.watch`.
 
 Key design choices:
 - **tsserver** (not `ts.createLanguageService()`) — handles declaration maps, project references, and cross-package navigation natively
-- **All paths relative** — tool inputs/outputs use project-relative paths; the server resolves to absolute paths for tsserver internally
+- **oxc-parser + oxc-resolver** — ~100ms graph build for 400+ file monorepos. Uses `parseSync().module` convenience API (no AST walking). Resolves through tsconfig project references with `extensionAlias` for NodeNext `.js` → `.ts` mapping.
+- **dist→source remapping** — automatically maps resolved `dist/` paths back to source `.ts` files in monorepos with `outDir: "dist"` / `rootDir: "src"` patterns
+- **All paths relative** — tool inputs/outputs use project-relative paths; the server resolves to absolute paths internally
 - **Navbar + navto fallback** — symbol search tries the file's AST (navbar) first, then falls back to project-wide search (navto). This covers object literal property keys that navto doesn't index
 - **Graceful recovery** — auto-restarts tsserver on crash (up to 3 times), re-opens previously tracked files
-- **No file watching** — tsserver handles file change detection automatically
+- **Incremental graph updates** — `fs.watch` detects file changes and updates the import graph without full rebuild
 
 ## Known Limitations
 
