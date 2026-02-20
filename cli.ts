@@ -123,14 +123,6 @@ const SKILL_FILES = [
   "skills/code-exploration/SKILL.md",
 ];
 
-/** .agents/skills/ copies inside plugin dir (source for project-root copies) */
-const AGENTS_SKILL_FILES = [
-  ".agents/skills/tool-selection/SKILL.md",
-  ".agents/skills/impact-analysis/SKILL.md",
-  ".agents/skills/refactor-safety/SKILL.md",
-  ".agents/skills/dependency-audit/SKILL.md",
-  ".agents/skills/code-exploration/SKILL.md",
-];
 
 const SKILL_NAMES = [
   "tool-selection",
@@ -315,9 +307,6 @@ async function setup(yes: boolean): Promise<void> {
   // Skills are always needed (either for in-plugin discovery or as source for .agents/skills/ copies)
   if (needsPluginSkills || needsAgentsSkills) {
     filesToCopy.push(...SKILL_FILES);
-  }
-  if (needsAgentsSkills) {
-    filesToCopy.push(...AGENTS_SKILL_FILES);
   }
 
   // Add agent-specific files
