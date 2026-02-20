@@ -43,16 +43,20 @@ const PLUGIN_DIR_NAME = "plugins/typegraph-mcp";
 
 /** Files to copy when embedding the plugin into a project */
 const PLUGIN_FILES = [
-  // Plugin manifest & MCP config
+  // Claude Code plugin
   ".claude-plugin/plugin.json",
   ".mcp.json",
+  // Cursor plugin
+  ".cursor-plugin/plugin.json",
+  // Gemini CLI extension
+  "gemini-extension.json",
   // Hooks & scripts
   "hooks/hooks.json",
   "scripts/ensure-deps.sh",
-  // Commands
+  // Commands (Claude Code)
   "commands/check.md",
   "commands/test.md",
-  // Skills
+  // Skills (shared across all platforms)
   "skills/tool-selection/SKILL.md",
   "skills/impact-analysis/SKILL.md",
   "skills/refactor-safety/SKILL.md",
@@ -188,7 +192,42 @@ async function setup(yes: boolean): Promise<void> {
   }
   console.log("");
 
-  // 4. Remove old .claude/mcp.json entry if present (plugin .mcp.json handles registration)
+  // 4. Create .agents/skills/ symlinks for cross-platform discovery (Codex, Gemini, Copilot)
+  console.log("── Cross-Platform Skills ────────────────────────────────────");
+  const agentsSkillsDir = path.resolve(projectRoot, ".agents/skills");
+  const skillNames = ["tool-selection", "impact-analysis", "refactor-safety", "dependency-audit", "code-exploration"];
+  if (!fs.existsSync(agentsSkillsDir)) {
+    fs.mkdirSync(agentsSkillsDir, { recursive: true });
+  }
+  let linkedCount = 0;
+  for (const skill of skillNames) {
+    const linkPath = path.join(agentsSkillsDir, skill);
+    const targetPath = path.relative(path.dirname(linkPath), path.join(targetDir, "skills", skill));
+    if (fs.existsSync(linkPath)) {
+      // Already exists — check if it's a symlink pointing to the right place
+      try {
+        const existing = fs.readlinkSync(linkPath);
+        if (existing === targetPath) continue;
+      } catch {
+        // Not a symlink — skip to avoid overwriting user files
+        continue;
+      }
+    }
+    try {
+      fs.symlinkSync(targetPath, linkPath);
+      linkedCount++;
+    } catch {
+      // Symlink creation failed (e.g. permissions) — not critical
+    }
+  }
+  if (linkedCount > 0) {
+    console.log(`  Created ${linkedCount} symlinks in .agents/skills/ (Codex, Gemini, Copilot)`);
+  } else {
+    console.log("  .agents/skills/ already up to date");
+  }
+  console.log("");
+
+  // 5. Remove old .claude/mcp.json entry if present (plugin .mcp.json handles registration)
   const mcpJsonPath = path.resolve(projectRoot, ".claude/mcp.json");
   if (fs.existsSync(mcpJsonPath)) {
     try {
