@@ -368,19 +368,17 @@ export async function main(configOverride?: TypegraphConfig): Promise<CheckResul
     const eslintConfigPath = path.resolve(projectRoot, "eslint.config.mjs");
     if (fs.existsSync(eslintConfigPath)) {
       const eslintContent = fs.readFileSync(eslintConfigPath, "utf-8");
-      const hasToolsIgnore = /["']tools\/\*\*["']/.test(eslintContent);
-      const hasTestIgnore = /["']\.typegraph-test\/\*\*["']/.test(eslintContent);
+      // Determine the parent directory (e.g. "tools" or "plugins") for the ignore pattern
+      const parentDir = path.basename(path.dirname(toolDir));
+      const parentIgnorePattern = new RegExp(`["']${parentDir}\\/\\*\\*["']`);
+      const hasParentIgnore = parentIgnorePattern.test(eslintContent);
 
-      if (hasToolsIgnore && hasTestIgnore) {
-        pass("ESLint ignores tools/ and .typegraph-test/");
+      if (hasParentIgnore) {
+        pass(`ESLint ignores ${parentDir}/`);
       } else {
-        const missing: string[] = [];
-        if (!hasToolsIgnore) missing.push('"tools/**"');
-        if (!hasTestIgnore) missing.push('".typegraph-test/**"');
         fail(
-          `ESLint missing ignores: ${missing.join(", ")}`,
-          `Add to the ignores array in eslint.config.mjs:\n` +
-            missing.map((m) => `    ${m},`).join("\n")
+          `ESLint missing ignore: "${parentDir}/**"`,
+          `Add to the ignores array in eslint.config.mjs:\n    "${parentDir}/**",`
         );
       }
     } else {
@@ -402,16 +400,17 @@ export async function main(configOverride?: TypegraphConfig): Promise<CheckResul
       (l: string) => l === ".claude/" || l === ".claude" || l === "/.claude"
     );
 
-    // Only check tools/ exclusion when typegraph-mcp is embedded
-    const ignoresTools =
-      toolIsEmbedded &&
-      lines.some((l: string) => l === "tools/" || l === "tools" || l === "/tools");
+    // Check parent dir exclusion when typegraph-mcp is embedded
+    const parentDir = toolIsEmbedded ? path.basename(path.dirname(toolDir)) : null;
+    const ignoresParent =
+      parentDir &&
+      lines.some((l: string) => l === `${parentDir}/` || l === parentDir || l === `/${parentDir}`);
 
-    if (!ignoresTools && !ignoresClaude) {
-      pass(".gitignore does not exclude .claude/" + (toolIsEmbedded ? " or tools/" : ""));
+    if (!ignoresParent && !ignoresClaude) {
+      pass(".gitignore does not exclude .claude/" + (parentDir ? ` or ${parentDir}/` : ""));
     } else {
       const excluded: string[] = [];
-      if (ignoresTools) excluded.push("tools/");
+      if (ignoresParent) excluded.push(`${parentDir}/`);
       if (ignoresClaude) excluded.push(".claude/");
       warn(
         `.gitignore excludes ${excluded.join(" and ")}`,

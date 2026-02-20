@@ -177,21 +177,14 @@ async function setup(yes: boolean): Promise<void> {
 
   console.log(`  ${isUpdate ? "Updated" : "Installed"} ${copied} files to ${PLUGIN_DIR_NAME}/`);
 
-  // 3. Install dependencies
+  // 3. Install dependencies (use npm to avoid pnpm workspace interference)
   console.log("  Installing dependencies...");
   try {
-    if (fs.existsSync(path.join(targetDir, "pnpm-lock.yaml"))) {
-      execSync("pnpm install --frozen-lockfile 2>/dev/null || pnpm install", {
-        cwd: targetDir,
-        stdio: "pipe",
-      });
-    } else {
-      execSync("npm install", { cwd: targetDir, stdio: "pipe" });
-    }
+    execSync("npm install", { cwd: targetDir, stdio: "pipe" });
     console.log("  Dependencies installed");
   } catch (err) {
     console.log(`  Warning: dependency install failed: ${err instanceof Error ? err.message : String(err)}`);
-    console.log("  Run manually: cd " + PLUGIN_DIR_NAME + " && pnpm install");
+    console.log("  Run manually: cd " + PLUGIN_DIR_NAME + " && npm install");
   }
   console.log("");
 
@@ -257,16 +250,18 @@ async function setupAgentInstructions(projectRoot: string, _yes: boolean): Promi
   // Update --plugin-dir line in CLAUDE.md if it exists
   const claudeMdPath = path.resolve(projectRoot, "CLAUDE.md");
   if (fs.existsSync(claudeMdPath)) {
-    const content = fs.readFileSync(claudeMdPath, "utf-8");
+    let content = fs.readFileSync(claudeMdPath, "utf-8");
     const pluginDirPattern = /(`claude\s+)((?:--plugin-dir\s+\S+\s*)+)(`)/;
     const match = content.match(pluginDirPattern);
 
     if (match && !match[2]!.includes("./plugins/typegraph-mcp")) {
-      const updated = content.replace(
+      // Ensure the existing flags end with a space before appending
+      const existingFlags = match[2]!.trimEnd();
+      content = content.replace(
         pluginDirPattern,
-        `$1$2--plugin-dir ./plugins/typegraph-mcp $3`
+        `$1${existingFlags} --plugin-dir ./plugins/typegraph-mcp$3`
       );
-      fs.writeFileSync(claudeMdPath, updated);
+      fs.writeFileSync(claudeMdPath, content);
       console.log("  CLAUDE.md: added --plugin-dir ./plugins/typegraph-mcp to plugin loading line");
     } else if (!match) {
       // No existing --plugin-dir line found — not an error, just skip
