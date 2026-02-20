@@ -56,12 +56,18 @@ const PLUGIN_FILES = [
   // Commands (Claude Code)
   "commands/check.md",
   "commands/test.md",
-  // Skills (shared across all platforms)
+  // Skills (Claude Code + Cursor discover from skills/)
   "skills/tool-selection/SKILL.md",
   "skills/impact-analysis/SKILL.md",
   "skills/refactor-safety/SKILL.md",
   "skills/dependency-audit/SKILL.md",
   "skills/code-exploration/SKILL.md",
+  // Skills (Codex, Gemini, Copilot discover from .agents/skills/)
+  ".agents/skills/tool-selection/SKILL.md",
+  ".agents/skills/impact-analysis/SKILL.md",
+  ".agents/skills/refactor-safety/SKILL.md",
+  ".agents/skills/dependency-audit/SKILL.md",
+  ".agents/skills/code-exploration/SKILL.md",
   // Server & core modules
   "server.ts",
   "module-graph.ts",
@@ -192,36 +198,28 @@ async function setup(yes: boolean): Promise<void> {
   }
   console.log("");
 
-  // 4. Create .agents/skills/ symlinks for cross-platform discovery (Codex, Gemini, Copilot)
+  // 4. Copy skills to .agents/skills/ for cross-platform discovery (Codex, Gemini, Copilot)
   console.log("── Cross-Platform Skills ────────────────────────────────────");
   const agentsSkillsDir = path.resolve(projectRoot, ".agents/skills");
   const skillNames = ["tool-selection", "impact-analysis", "refactor-safety", "dependency-audit", "code-exploration"];
-  if (!fs.existsSync(agentsSkillsDir)) {
-    fs.mkdirSync(agentsSkillsDir, { recursive: true });
-  }
-  let linkedCount = 0;
+  let copiedSkills = 0;
   for (const skill of skillNames) {
-    const linkPath = path.join(agentsSkillsDir, skill);
-    const targetPath = path.relative(path.dirname(linkPath), path.join(targetDir, "skills", skill));
-    if (fs.existsSync(linkPath)) {
-      // Already exists — check if it's a symlink pointing to the right place
-      try {
-        const existing = fs.readlinkSync(linkPath);
-        if (existing === targetPath) continue;
-      } catch {
-        // Not a symlink — skip to avoid overwriting user files
-        continue;
-      }
+    const src = path.join(targetDir, "skills", skill, "SKILL.md");
+    const destDir = path.join(agentsSkillsDir, skill);
+    const dest = path.join(destDir, "SKILL.md");
+    if (!fs.existsSync(src)) continue;
+    if (fs.existsSync(dest)) {
+      // Check if content matches — skip if identical
+      const srcContent = fs.readFileSync(src, "utf-8");
+      const destContent = fs.readFileSync(dest, "utf-8");
+      if (srcContent === destContent) continue;
     }
-    try {
-      fs.symlinkSync(targetPath, linkPath);
-      linkedCount++;
-    } catch {
-      // Symlink creation failed (e.g. permissions) — not critical
-    }
+    fs.mkdirSync(destDir, { recursive: true });
+    fs.copyFileSync(src, dest);
+    copiedSkills++;
   }
-  if (linkedCount > 0) {
-    console.log(`  Created ${linkedCount} symlinks in .agents/skills/ (Codex, Gemini, Copilot)`);
+  if (copiedSkills > 0) {
+    console.log(`  Copied ${copiedSkills} skills to .agents/skills/ (Codex, Gemini, Copilot)`);
   } else {
     console.log("  .agents/skills/ already up to date");
   }
