@@ -16,7 +16,7 @@ export interface TypegraphConfig {
   tsconfigPath: string;
   /** Absolute path to the typegraph-mcp tool directory */
   toolDir: string;
-  /** Whether typegraph-mcp is embedded inside the project (e.g. tools/typegraph-mcp/) */
+  /** Whether typegraph-mcp is embedded inside the project (e.g. plugins/typegraph-mcp/) */
   toolIsEmbedded: boolean;
   /** Path to tool dir — relative to projectRoot if embedded, else absolute */
   toolRelPath: string;
@@ -29,7 +29,7 @@ export interface TypegraphConfig {
  *
  * Project root detection (three-level fallback):
  *   1. TYPEGRAPH_PROJECT_ROOT env var (explicit override)
- *   2. If toolDir is inside a `tools/` directory, go up two levels
+ *   2. If toolDir is inside a `plugins/` directory, go up two levels
  *   3. Otherwise, use cwd (standalone deployment, run from target project)
  */
 export function resolveConfig(toolDir: string): TypegraphConfig {
@@ -37,7 +37,7 @@ export function resolveConfig(toolDir: string): TypegraphConfig {
 
   const projectRoot = process.env["TYPEGRAPH_PROJECT_ROOT"]
     ? path.resolve(cwd, process.env["TYPEGRAPH_PROJECT_ROOT"])
-    : ["tools", "plugins"].includes(path.basename(path.dirname(toolDir)))
+    : path.basename(path.dirname(toolDir)) === "plugins"
       ? path.resolve(toolDir, "../..")
       : cwd;
 
