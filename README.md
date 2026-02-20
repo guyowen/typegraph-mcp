@@ -293,6 +293,19 @@ ignores: [
 
 Not needed when ts-nav-mcp lives outside the project tree.
 
+### CLAUDE.md snippet
+
+Add this to the project's `CLAUDE.md` so the agent knows to use ts-nav instead of grep:
+
+```markdown
+## TypeScript Navigation (ts-nav-mcp)
+
+Use the `ts_*` MCP tools instead of grep/glob for navigating TypeScript code. They resolve through barrel files, re-exports, and project references — returning precise results, not string matches.
+
+- **Point queries** (tsserver): `ts_find_symbol`, `ts_definition`, `ts_references`, `ts_type_info`, `ts_navigate_to`, `ts_trace_chain`, `ts_blast_radius`, `ts_module_exports`
+- **Graph queries** (import graph): `ts_dependency_tree`, `ts_dependents`, `ts_import_cycles`, `ts_shortest_path`, `ts_subgraph`, `ts_module_boundary`
+```
+
 ## Troubleshooting
 
 Run the health check first — it catches most issues:
