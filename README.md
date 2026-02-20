@@ -1,34 +1,58 @@
 # ts-nav-mcp
 
-MCP server that gives AI coding agents type-aware TypeScript codebase navigation — go-to-definition, find-references, type info, dependency graphs, cycle detection, and more — powered by `tsserver` and `oxc-parser`.
+Give your AI coding agent the same TypeScript understanding your IDE has.
 
-## Why
+14 semantic navigation tools — go-to-definition, find-references, type info, dependency graphs, cycle detection, impact analysis — delivered via the [Model Context Protocol](https://modelcontextprotocol.io/) so any MCP-compatible agent can use them.
 
-AI agents navigating TypeScript codebases typically rely on `grep` and file reads, which produce noisy results and can't resolve types, barrel re-exports, or cross-package imports. This MCP server provides **semantic** navigation: it understands your types, follows imports through barrel files to source (not `.d.ts`), and returns only real code references (not string matches).
+## The problem
 
-Measured against a real monorepo: **99% context token reduction** compared to grep-based navigation (1,006 vs ~113,000 tokens for the same call-chain trace).
+AI coding agents navigate TypeScript blind. They `grep` for a symbol name and get string matches instead of real references. They read entire files to find a type that's re-exported through three barrel files. They can't tell you what depends on what, or whether your refactor will break something two packages away.
 
-## Requirements
+Every wrong turn burns context tokens and degrades the agent's output.
 
-- **Node.js** >= 18
-- **TypeScript** >= 5.0 installed in the target project (resolved from `node_modules`)
-- **tsx** (installed globally or via `npx`)
+## The difference
 
-## Setup
+Measured on a real monorepo — tracing a call chain from an API handler to its implementation:
 
-### 1. Clone or copy to any location
+| | grep | ts-nav-mcp |
+|---|---|---|
+| **Tokens consumed** | ~113,000 | 1,006 |
+| **Files touched** | 47 | 3 |
+| **False positives** | dozens of string matches | 0 |
 
-```bash
-git clone <this-repo> ~/tools/ts-nav-mcp
-cd ~/tools/ts-nav-mcp
-pnpm install
+**99% context reduction.** The agent gets precise answers in milliseconds instead of noisy guesses.
+
+### Before: grep-based navigation
+
+```
+Agent: I need to find where createUser is implemented.
+  → grep "createUser" across project
+  → 47 results: test files, comments, variable names, string literals, actual definitions
+  → reads 6 files trying to follow the chain
+  → burns ~113,000 tokens, still not sure it found the right implementation
 ```
 
-### 2. Register with your AI agent
+### After: ts-nav-mcp
 
-#### Claude Code
+```
+Agent: ts_trace_chain({ file: "src/handlers.ts", symbol: "createUser" })
+  → 3-hop chain: handlers.ts → UserService.ts → UserRepository.ts
+  → each hop shows the exact line with a code preview
+  → 1,006 tokens, done
+```
 
-Add to `.claude/mcp.json` in your project root (or `~/.claude/mcp.json` for global):
+## Quick start
+
+### 1. Install
+
+```bash
+git clone https://github.com/AltClick/ts-nav-mcp.git ~/ts-nav-mcp
+cd ~/ts-nav-mcp && pnpm install
+```
+
+### 2. Register
+
+Add to `.claude/mcp.json` in your project (or `~/.claude/mcp.json` for global):
 
 ```json
 {
@@ -45,184 +69,189 @@ Add to `.claude/mcp.json` in your project root (or `~/.claude/mcp.json` for glob
 }
 ```
 
-#### Other MCP-compatible agents
+`TS_NAV_PROJECT_ROOT` resolves relative to the agent's working directory. Use `"."` for project-local config. The `args` path to `server.ts` must be absolute.
 
-Any agent that supports the [Model Context Protocol](https://modelcontextprotocol.io/) can use this server. The server communicates over stdin/stdout using the standard MCP protocol. Configure your agent to spawn:
+### 3. Verify
 
 ```bash
-npx tsx /path/to/ts-nav-mcp/server.ts
+npx tsx ~/ts-nav-mcp/check.ts
 ```
 
-With environment variables:
-- `TS_NAV_PROJECT_ROOT` — absolute or relative path to the project root (default: cwd)
-- `TS_NAV_TSCONFIG` — path to tsconfig.json relative to project root (default: `./tsconfig.json`)
+Runs 12 checks (Node.js, TypeScript, tsconfig, MCP registration, dependencies, oxc-parser, oxc-resolver, tsserver, module graph, and more). All should pass.
 
-### 3. Restart your agent
+### 4. Restart your agent session
 
-The MCP server starts automatically when your agent session begins. First query will take ~2s (tsserver warm-up), subsequent queries are typically 1-60ms.
+First query takes ~2s (tsserver warmup). Subsequent queries: 1–60ms.
+
+## Requirements
+
+- **Node.js** >= 18
+- **TypeScript** >= 5.0 in the target project (`node_modules`)
+- **pnpm** for installing ts-nav-mcp dependencies
 
 ## Tools
 
-### `ts_find_symbol`
-Find a symbol's location in a file by name. Entry point for navigating without exact line/column coordinates.
+### Semantic point queries (tsserver)
+
+These tools understand your types, resolve through imports and barrel files, and return real code — not string matches.
+
+#### `ts_find_symbol`
+Find a symbol's location in a file by name.
 
 ```
-Input:  { file: "src/services/Auth.ts", symbol: "validateToken" }
-Output: { file, line, column, kind, preview }
+{ file: "src/services/Auth.ts", symbol: "validateToken" }
+→ { file, line, column, kind, preview }
 ```
 
-### `ts_definition`
-Go to definition. Resolves through imports, re-exports, barrel files, interfaces, and generics. Accepts either `line+column` or `symbol` name.
+#### `ts_definition`
+Go to definition. Resolves through imports, re-exports, barrel files, interfaces, and generics.
 
 ```
-Input:  { file: "src/handlers.ts", symbol: "UserService" }
-   or:  { file: "src/handlers.ts", line: 42, column: 3 }
-Output: { definitions: [{ file, line, column, preview }] }
+{ file: "src/handlers.ts", symbol: "UserService" }
+→ { definitions: [{ file, line, column, preview }] }
 ```
 
-### `ts_references`
-Find all semantic references to a symbol (not string matches). Returns only real code usage.
+#### `ts_references`
+Find all semantic references to a symbol (not string matches).
 
 ```
-Input:  { file: "src/services/Auth.ts", symbol: "validateToken" }
-Output: { references: [{ file, line, column, preview, isDefinition }], count }
+{ file: "src/services/Auth.ts", symbol: "validateToken" }
+→ { references: [{ file, line, column, preview, isDefinition }], count }
 ```
 
-### `ts_type_info`
-Get the TypeScript type and documentation for a symbol — the same info you see when hovering in VS Code.
+#### `ts_type_info`
+Get the TypeScript type and documentation — the same info you see hovering in VS Code.
 
 ```
-Input:  { file: "src/handlers.ts", symbol: "userService" }
-Output: { type: "const userService: { readonly getUser: ...", documentation: "...", kind: "const" }
+{ file: "src/handlers.ts", symbol: "userService" }
+→ { type: "const userService: { readonly getUser: ...", documentation: "..." }
 ```
 
-### `ts_navigate_to`
-Search for a symbol across the entire project without knowing which file it's in. Optionally provide a `file` hint to also search that file's navbar (useful for object literal property keys that `navto` doesn't index).
+#### `ts_navigate_to`
+Search for a symbol across the entire project without knowing which file it's in.
 
 ```
-Input:  { symbol: "validateToken", maxResults: 10 }
-Output: { results: [{ file, line, column, kind, containerName, matchKind }], count }
+{ symbol: "validateToken", maxResults: 10 }
+→ { results: [{ file, line, column, kind, containerName }], count }
 ```
 
-### `ts_trace_chain`
-Automatically follow go-to-definition hops from a symbol, building a call chain from entry point to implementation. Stops at self-references, `node_modules`, or max hops.
+#### `ts_trace_chain`
+Follow go-to-definition hops automatically, building a call chain from entry point to implementation.
 
 ```
-Input:  { file: "src/handlers.ts", symbol: "createUser", maxHops: 5 }
-Output: { chain: [{ file, line, column, preview }, ...], hops: 3 }
+{ file: "src/handlers.ts", symbol: "createUser", maxHops: 5 }
+→ { chain: [{ file, line, column, preview }, ...], hops: 3 }
 ```
 
-### `ts_blast_radius`
-Analyze the impact of changing a symbol. Finds all references, filters to usage sites (excludes definition), and reports affected files.
+#### `ts_blast_radius`
+Analyze the impact of changing a symbol — all usage sites and affected files.
 
 ```
-Input:  { file: "src/services/Auth.ts", symbol: "validateToken" }
-Output: { directCallers: 12, filesAffected: ["src/handlers.ts", ...], callers: [...] }
+{ file: "src/services/Auth.ts", symbol: "validateToken" }
+→ { directCallers: 12, filesAffected: ["src/handlers.ts", ...], callers: [...] }
 ```
 
-### `ts_module_exports`
-List all exported symbols from a module with their resolved types. Gives an at-a-glance understanding of what a file provides.
+#### `ts_module_exports`
+List all exports from a module with their resolved types.
 
 ```
-Input:  { file: "src/services/Auth.ts" }
-Output: { file, exports: [{ symbol, kind, line, type }], count }
+{ file: "src/services/Auth.ts" }
+→ { exports: [{ symbol, kind, line, type }], count }
 ```
 
-### `ts_dependency_tree`
-Get the transitive dependency tree (imports) of a file. Shows what a file depends on, directly and transitively.
+### Structural graph queries (oxc-parser + oxc-resolver)
+
+These tools operate on the full import graph, built in ~100ms and kept current via `fs.watch`.
+
+#### `ts_dependency_tree`
+Transitive dependency tree of a file — what it depends on.
 
 ```
-Input:  { file: "src/handlers.ts", depth: 3, includeTypeOnly: false }
-Output: { root, nodes: 42, files: ["src/utils.ts", ...] }
+{ file: "src/handlers.ts", depth: 3, includeTypeOnly: false }
+→ { root, nodes: 42, files: [...] }
 ```
 
-### `ts_dependents`
-Find all files that depend on (import) a given file, directly and transitively. Groups results by package.
+#### `ts_dependents`
+All files that depend on a given file, grouped by package.
 
 ```
-Input:  { file: "src/schemas/ids.ts" }
-Output: { root, nodes: 155, directCount: 31, files: [...], byPackage: { "@my/core": [...], ... } }
+{ file: "src/schemas/ids.ts" }
+→ { nodes: 155, directCount: 31, byPackage: { "@my/core": [...] } }
 ```
 
-### `ts_import_cycles`
-Detect circular import dependencies in the project. Returns strongly connected components (cycles) in the import graph.
+#### `ts_import_cycles`
+Detect circular import dependencies (strongly connected components).
 
 ```
-Input:  { file: "src/services/Auth.ts" }  // optional filter
-Output: { count: 1, cycles: [["src/a.ts", "src/b.ts"]] }
+{ file: "src/services/Auth.ts" }  // optional filter
+→ { count: 1, cycles: [["src/a.ts", "src/b.ts"]] }
 ```
 
-### `ts_shortest_path`
-Find the shortest import path between two files. Shows how one module reaches another through the import graph.
+#### `ts_shortest_path`
+Shortest import path between two files.
 
 ```
-Input:  { from: "src/handlers.ts", to: "src/schemas/ids.ts" }
-Output: { path: ["src/handlers.ts", "src/schemas/index.ts", "src/schemas/ids.ts"], hops: 2, chain: [...] }
+{ from: "src/handlers.ts", to: "src/schemas/ids.ts" }
+→ { path: ["handlers.ts", "schemas/index.ts", "schemas/ids.ts"], hops: 2 }
 ```
 
-### `ts_subgraph`
-Extract a subgraph around seed files. Expands by depth hops in the specified direction (imports, dependents, or both).
+#### `ts_subgraph`
+Extract the neighborhood around seed files — imports, dependents, or both.
 
 ```
-Input:  { files: ["src/services/Auth.ts"], depth: 1, direction: "both" }
-Output: { nodes: [...], edges: [{ from, to, specifiers, isTypeOnly }], stats: { nodeCount, edgeCount } }
+{ files: ["src/services/Auth.ts"], depth: 1, direction: "both" }
+→ { nodes: [...], edges: [{ from, to, specifiers }], stats: { nodeCount, edgeCount } }
 ```
 
-### `ts_module_boundary`
-Analyze the boundary of a set of files: incoming/outgoing edges, shared dependencies, and an isolation score. Useful for understanding module coupling before refactoring.
+#### `ts_module_boundary`
+Analyze coupling of a module: incoming/outgoing edges, shared dependencies, isolation score.
 
 ```
-Input:  { files: ["src/schemas/ids.ts", "src/schemas/queue.ts", ...] }
-Output: { internalEdges: 8, incomingEdges: [...], outgoingEdges: [...], sharedDependencies: [...], isolationScore: 0.058 }
+{ files: ["src/schemas/ids.ts", "src/schemas/queue.ts"] }
+→ { internalEdges: 8, incomingEdges: [...], outgoingEdges: [...], isolationScore: 0.058 }
 ```
 
 ## Architecture
 
 ```
-AI Agent ─── stdin/stdout ─── MCP Server (server.ts) ─┬── pipe ─── tsserver (child)
-              MCP protocol                             │              tsserver protocol
-                                                       └── module-graph.ts (oxc-parser + oxc-resolver)
-                                                                      import graph
+AI Agent ─── stdin/stdout ─── MCP Server ─┬── tsserver (child process)
+              MCP protocol                │     type-aware point queries
+                                          └── module-graph (in-process)
+                                                oxc-parser + oxc-resolver
+                                                structural graph queries
 ```
 
-The server is a single Node.js process with two subsystems initialized concurrently at startup:
+Two subsystems start concurrently:
 
-1. **tsserver** — child process for type-aware point queries (definition, references, type info). Communicates over pipes using tsserver's Content-Length framed JSON protocol.
-2. **Module graph** — in-process import graph built with `oxc-parser` (fast NAPI parser) and `oxc-resolver` (tsconfig-aware resolution). Provides structural queries (dependency trees, cycles, paths, boundaries). Incrementally updated via `fs.watch`.
+1. **tsserver** — child process for semantic queries. Communicates via pipes using tsserver's JSON protocol. Auto-restarts on crash (up to 3 times) and re-opens tracked files.
 
-Key design choices:
-- **tsserver** (not `ts.createLanguageService()`) — handles declaration maps, project references, and cross-package navigation natively
-- **oxc-parser + oxc-resolver** — ~100ms graph build for 400+ file monorepos. Uses `parseSync().module` convenience API (no AST walking). Resolves through tsconfig project references with `extensionAlias` for NodeNext `.js` → `.ts` mapping.
-- **dist→source remapping** — automatically maps resolved `dist/` paths back to source `.ts` files in monorepos with `outDir: "dist"` / `rootDir: "src"` patterns
-- **All paths relative** — tool inputs/outputs use project-relative paths; the server resolves to absolute paths internally
-- **Navbar + navto fallback** — symbol search tries the file's AST (navbar) first, then falls back to project-wide search (navto). This covers object literal property keys that navto doesn't index
-- **Graceful recovery** — auto-restarts tsserver on crash (up to 3 times), re-opens previously tracked files
-- **Incremental graph updates** — `fs.watch` detects file changes and updates the import graph without full rebuild
+2. **Module graph** — in-process import graph built with [oxc-parser](https://github.com/nicolo-ribaudo/oxc-parser) (fast NAPI parser, no AST walking) and [oxc-resolver](https://github.com/nicolo-ribaudo/oxc-resolver) (tsconfig-aware resolution). Incrementally updated via `fs.watch`.
 
-## Known Limitations
+### Monorepo support
 
-- **Object literal property keys** (e.g., RPC handler names) are not indexed by tsserver's `navto` command. Use `ts_find_symbol` with a specific file, or pass the `file` hint to `ts_navigate_to`.
-- **First query latency** — ~2s on first query as tsserver loads the project. Subsequent queries are fast (1-60ms warm).
-- **Memory** — tsserver holds the project in memory. For very large monorepos (1000+ files), expect ~200-500MB RSS.
+Works out of the box with TypeScript project references:
 
-## Deploying to a New Project
+- Resolves through `composite` project references and declaration maps
+- Maps `dist/` paths back to source (handles `outDir: "dist"` / `rootDir: "src"`)
+- `extensionAlias` for NodeNext `.js` → `.ts` import mapping
+- Cross-package barrel re-export resolution
 
-### For an AI agent deploying this to a new TypeScript project:
+Point `TS_NAV_TSCONFIG` at your root `tsconfig.json` that includes all project references.
 
-1. **Verify TypeScript is installed** in the target project:
-   ```bash
-   ls node_modules/typescript/lib/tsserver.js
-   ```
-   If not present, the project needs `typescript` as a dev dependency.
+## Deploying to a new project
 
-2. **Verify a `tsconfig.json` exists** at the project root (or note its path for `TS_NAV_TSCONFIG`).
+### For AI agents setting this up in a new TypeScript project:
 
-3. **Install the MCP server** dependencies (one-time):
+1. **Verify prerequisites** in the target project:
+   - `node_modules/typescript/lib/tsserver.js` exists (TypeScript installed)
+   - `tsconfig.json` exists at the project root
+
+2. **Install dependencies** (one-time):
    ```bash
    cd /path/to/ts-nav-mcp && pnpm install
    ```
 
-4. **Register the MCP server** — add to `.claude/mcp.json` in the target project root (or `~/.claude/mcp.json` for global):
+3. **Register the MCP server** — add to `.claude/mcp.json`:
    ```json
    {
      "mcpServers": {
@@ -238,44 +267,47 @@ Key design choices:
    }
    ```
 
-   **Important:** `TS_NAV_PROJECT_ROOT` is resolved relative to the agent's working directory (the project root). Use `"."` when the `.claude/mcp.json` lives in the target project. Use an absolute path if configuring globally via `~/.claude/mcp.json`. The `args` path to `server.ts` must always be absolute.
-
-5. **ESLint configuration** (if the project uses ESLint with `typescript-eslint`):
-
-   The ts-nav-mcp test directory and tools directory are not part of the project's tsconfig, so ESLint's TypeScript parser will fail on them. Add to your ESLint config's `ignores` array:
-   ```javascript
-   // eslint.config.mjs (or equivalent)
-   ignores: [
-     "tools/**",        // ts-nav-mcp and other standalone tools
-     ".ts-nav-test/**", // ts-nav-mcp development test fixtures
-   ]
-   ```
-
-6. **Run the health check** to verify everything is configured correctly:
+4. **Run the health check**:
    ```bash
    npx tsx /path/to/ts-nav-mcp/check.ts
    ```
-   This runs 12 checks covering Node.js version, TypeScript, tsconfig, MCP registration, dependencies, oxc-parser, oxc-resolver, tsserver, module graph, ESLint ignores, and .gitignore. All checks should pass.
+   Every failing check shows a `Fix:` instruction. Follow them in order.
 
-7. **Restart the agent session** so it picks up the new MCP server.
+5. **Restart the agent session** and test with any `ts_*` tool.
 
-8. **Test** by asking the agent to find a symbol or get type info on any file in the project.
+### ESLint configuration
 
-### Monorepo support
+If ts-nav-mcp is embedded inside the project (e.g. `tools/ts-nav-mcp/`) and the project uses `typescript-eslint`, add to your ESLint `ignores`:
 
-For monorepos with TypeScript project references (`composite: true`), point `TS_NAV_TSCONFIG` at the root `tsconfig.json` that includes all project references. tsserver will automatically resolve cross-package imports through declaration maps.
+```javascript
+ignores: [
+  "tools/**",
+  ".ts-nav-test/**",
+]
+```
 
-### Troubleshooting
+Not needed when ts-nav-mcp lives outside the project tree.
 
-If the MCP server fails to start or tools return errors:
+## Troubleshooting
 
-1. Run the health check: `npx tsx /path/to/ts-nav-mcp/check.ts`
-2. Each failing check shows a `Fix:` instruction — follow them in order
-3. Common issues:
-   - **Dependencies not installed**: `cd /path/to/ts-nav-mcp && pnpm install`
-   - **TypeScript not found**: the target project needs `typescript` as a dependency
-   - **tsconfig.json missing**: create one or update `TS_NAV_TSCONFIG` to point to the correct path
-   - **MCP registration wrong**: verify the `args` path to `server.ts` is absolute and correct
+Run the health check first — it catches most issues:
+
+```bash
+npx tsx /path/to/ts-nav-mcp/check.ts
+```
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| Server won't start | Dependencies missing | `cd /path/to/ts-nav-mcp && pnpm install` |
+| "TypeScript not found" | Target project missing TS | Add `typescript` to devDependencies |
+| Tools return empty results | tsconfig misconfigured | Check `TS_NAV_TSCONFIG` points to the right file |
+| MCP registration not found | Wrong path in config | Verify the `args` path to `server.ts` is absolute |
+
+## Known limitations
+
+- **Object literal property keys** (e.g., RPC handler names) are not indexed by tsserver's `navto`. Use `ts_find_symbol` with a specific file, or pass the `file` hint to `ts_navigate_to`.
+- **First query latency** — ~2s as tsserver loads the project. Subsequent queries are 1–60ms.
+- **Memory** — tsserver holds the project in memory. For very large monorepos (1000+ files), expect ~200–500MB RSS.
 
 ## License
 
