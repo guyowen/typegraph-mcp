@@ -274,10 +274,7 @@ function registerCodexMcp(projectRoot: string): void {
     "[mcp_servers.typegraph]",
     'command = "npx"',
     'args = ["tsx", "./plugins/typegraph-mcp/server.ts"]',
-    "",
-    "[mcp_servers.typegraph.env]",
-    'TYPEGRAPH_PROJECT_ROOT = "."',
-    'TYPEGRAPH_TSCONFIG = "./tsconfig.json"',
+    'env = { TYPEGRAPH_PROJECT_ROOT = ".", TYPEGRAPH_TSCONFIG = "./tsconfig.json" }',
     "",
   ].join("\n");
 
@@ -285,7 +282,8 @@ function registerCodexMcp(projectRoot: string): void {
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
-  fs.writeFileSync(fullPath, content.trimEnd() + "\n" + block);
+  const newContent = content ? content.trimEnd() + "\n" + block : block.trimStart();
+  fs.writeFileSync(fullPath, newContent);
   p.log.success(`${configPath}: registered typegraph MCP server`);
 }
 
@@ -298,9 +296,9 @@ function deregisterCodexMcp(projectRoot: string): void {
   let content = fs.readFileSync(fullPath, "utf-8");
   if (!content.includes("[mcp_servers.typegraph]")) return;
 
-  // Remove the [mcp_servers.typegraph] section and its [mcp_servers.typegraph.env] subsection
+  // Remove the [mcp_servers.typegraph] section (stops at next section header or end of file)
   content = content.replace(
-    /\n?\[mcp_servers\.typegraph\]\n[\s\S]*?(?=\n\[(?!mcp_servers\.typegraph\.)|$)/,
+    /\n?\[mcp_servers\.typegraph\]\n[\s\S]*?(?=\n\[|$)/,
     ""
   );
 
