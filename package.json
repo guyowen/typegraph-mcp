@@ -17,6 +17,7 @@
     "check": "tsx check.ts"
   },
   "dependencies": {
+    "@clack/prompts": "^1.0.1",
     "@modelcontextprotocol/sdk": "^1.26.0",
     "oxc-parser": "^0.114.0",
     "oxc-resolver": "^11.17.1",

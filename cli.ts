@@ -15,8 +15,8 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import * as readline from "node:readline";
 import { execSync } from "node:child_process";
+import * as p from "@clack/prompts";
 import { resolveConfig } from "./config.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -138,10 +138,11 @@ typegraph-mcp — Type-aware codebase navigation for AI coding agents.
 Usage: typegraph-mcp <command> [options]
 
 Commands:
-  setup   Install typegraph-mcp plugin into the current project
-  check   Run health checks (12 checks)
-  test    Run smoke tests (all 14 tools)
-  start   Start the MCP server (stdin/stdout)
+  setup    Install typegraph-mcp plugin into the current project
+  remove   Uninstall typegraph-mcp from the current project
+  check    Run health checks (12 checks)
+  test     Run smoke tests (all 14 tools)
+  start    Start the MCP server (stdin/stdout)
 
 Options:
   --yes   Skip confirmation prompts (accept all defaults)
@@ -149,26 +150,6 @@ Options:
 `.trim();
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-
-function confirm(question: string): Promise<boolean> {
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-  return new Promise((resolve) => {
-    rl.question(`${question} [Y/n] `, (answer) => {
-      rl.close();
-      resolve(answer.trim().toLowerCase() !== "n");
-    });
-  });
-}
-
-function prompt(question: string): Promise<string> {
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-  return new Promise((resolve) => {
-    rl.question(question, (answer) => {
-      rl.close();
-      resolve(answer.trim());
-    });
-  });
-}
 
 function copyFile(src: string, dest: string): void {
   const destDir = path.dirname(dest);
@@ -182,6 +163,158 @@ function copyFile(src: string, dest: string): void {
   }
 }
 
+// ─── MCP Server Registration ────────────────────────────────────────────────
+
+const MCP_SERVER_ENTRY = {
+  command: "npx",
+  args: ["tsx", "./plugins/typegraph-mcp/server.ts"],
+  env: {
+    TYPEGRAPH_PROJECT_ROOT: ".",
+    TYPEGRAPH_TSCONFIG: "./tsconfig.json",
+  },
+};
+
+/** Register the typegraph MCP server in agent-specific config files */
+function registerMcpServers(projectRoot: string, selectedAgents: AgentId[]): void {
+  if (selectedAgents.includes("cursor")) {
+    registerJsonMcp(projectRoot, ".cursor/mcp.json", "mcpServers");
+  }
+  if (selectedAgents.includes("codex")) {
+    registerCodexMcp(projectRoot);
+  }
+  if (selectedAgents.includes("copilot")) {
+    registerJsonMcp(projectRoot, ".vscode/mcp.json", "servers");
+  }
+}
+
+/** Deregister the typegraph MCP server from all agent config files */
+function deregisterMcpServers(projectRoot: string): void {
+  deregisterJsonMcp(projectRoot, ".cursor/mcp.json", "mcpServers");
+  deregisterCodexMcp(projectRoot);
+  deregisterJsonMcp(projectRoot, ".vscode/mcp.json", "servers");
+}
+
+/** Register MCP server in a JSON config file (Cursor or Copilot format) */
+function registerJsonMcp(projectRoot: string, configPath: string, rootKey: string): void {
+  const fullPath = path.resolve(projectRoot, configPath);
+  let config: Record<string, unknown> = {};
+
+  if (fs.existsSync(fullPath)) {
+    try {
+      config = JSON.parse(fs.readFileSync(fullPath, "utf-8"));
+    } catch {
+      p.log.warn(`Could not parse ${configPath} — skipping MCP registration`);
+      return;
+    }
+  }
+
+  const servers = (config[rootKey] as Record<string, unknown>) ?? {};
+  const entry: Record<string, unknown> = { ...MCP_SERVER_ENTRY };
+  // Copilot requires "type": "stdio"
+  if (rootKey === "servers") {
+    entry.type = "stdio";
+  }
+  servers["typegraph"] = entry;
+  config[rootKey] = servers;
+
+  const dir = path.dirname(fullPath);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+  fs.writeFileSync(fullPath, JSON.stringify(config, null, 2) + "\n");
+  p.log.success(`${configPath}: registered typegraph MCP server`);
+}
+
+/** Deregister MCP server from a JSON config file */
+function deregisterJsonMcp(projectRoot: string, configPath: string, rootKey: string): void {
+  const fullPath = path.resolve(projectRoot, configPath);
+  if (!fs.existsSync(fullPath)) return;
+
+  try {
+    const config = JSON.parse(fs.readFileSync(fullPath, "utf-8"));
+    const servers = config[rootKey];
+    if (!servers || !servers["typegraph"]) return;
+
+    delete servers["typegraph"];
+
+    // Clean up empty objects
+    if (Object.keys(servers).length === 0) {
+      delete config[rootKey];
+    }
+
+    // If config is now empty, remove the file
+    if (Object.keys(config).length === 0) {
+      fs.unlinkSync(fullPath);
+    } else {
+      fs.writeFileSync(fullPath, JSON.stringify(config, null, 2) + "\n");
+    }
+    p.log.info(`${configPath}: removed typegraph MCP server`);
+  } catch {
+    // Ignore parse errors
+  }
+}
+
+/** Register MCP server in Codex CLI's TOML config */
+function registerCodexMcp(projectRoot: string): void {
+  const configPath = ".codex/config.toml";
+  const fullPath = path.resolve(projectRoot, configPath);
+  let content = "";
+
+  if (fs.existsSync(fullPath)) {
+    content = fs.readFileSync(fullPath, "utf-8");
+    // Already registered?
+    if (content.includes("[mcp_servers.typegraph]")) {
+      p.log.info(`${configPath}: typegraph MCP server already registered`);
+      return;
+    }
+  }
+
+  const block = [
+    "",
+    "[mcp_servers.typegraph]",
+    'command = "npx"',
+    'args = ["tsx", "./plugins/typegraph-mcp/server.ts"]',
+    "",
+    "[mcp_servers.typegraph.env]",
+    'TYPEGRAPH_PROJECT_ROOT = "."',
+    'TYPEGRAPH_TSCONFIG = "./tsconfig.json"',
+    "",
+  ].join("\n");
+
+  const dir = path.dirname(fullPath);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+  fs.writeFileSync(fullPath, content.trimEnd() + "\n" + block);
+  p.log.success(`${configPath}: registered typegraph MCP server`);
+}
+
+/** Deregister MCP server from Codex CLI's TOML config */
+function deregisterCodexMcp(projectRoot: string): void {
+  const configPath = ".codex/config.toml";
+  const fullPath = path.resolve(projectRoot, configPath);
+  if (!fs.existsSync(fullPath)) return;
+
+  let content = fs.readFileSync(fullPath, "utf-8");
+  if (!content.includes("[mcp_servers.typegraph]")) return;
+
+  // Remove the [mcp_servers.typegraph] section and its [mcp_servers.typegraph.env] subsection
+  content = content.replace(
+    /\n?\[mcp_servers\.typegraph\]\n[\s\S]*?(?=\n\[(?!mcp_servers\.typegraph\.)|$)/,
+    ""
+  );
+
+  // Clean up multiple trailing newlines
+  content = content.replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
+
+  if (content.trim() === "") {
+    fs.unlinkSync(fullPath);
+  } else {
+    fs.writeFileSync(fullPath, content);
+  }
+  p.log.info(`${configPath}: removed typegraph MCP server`);
+}
+
 // ─── Agent Selection ─────────────────────────────────────────────────────────
 
 function detectAgents(projectRoot: string): AgentId[] {
@@ -193,55 +326,31 @@ async function selectAgents(projectRoot: string, yes: boolean): Promise<AgentId[
 
   if (yes) {
     const selected = detected.length > 0 ? detected : [...AGENT_IDS];
-    console.log("── Agent Selection ──────────────────────────────────────────");
-    console.log("");
-    console.log(`  Auto-selected: ${selected.map((id) => AGENTS[id].name).join(", ")}`);
-    console.log("");
+    p.log.info(`Auto-selected: ${selected.map((id) => AGENTS[id].name).join(", ")}`);
     return selected;
   }
 
-  console.log("── Agent Selection ──────────────────────────────────────────");
-  console.log("");
-  console.log("  Select which AI agents to configure:");
-  console.log("");
+  p.log.info("space = toggle  |  up/down = navigate  |  enter = confirm");
 
-  for (let i = 0; i < AGENT_IDS.length; i++) {
-    const id = AGENT_IDS[i]!;
-    const agent = AGENTS[id];
-    const isDetected = detected.includes(id);
-    const marker = isDetected ? " (detected)" : "";
-    const num = `${i + 1}.`.padEnd(3);
-    console.log(`    ${num} ${agent.name.padEnd(16)}${marker}`);
+  const result = await p.multiselect({
+    message: "Select which AI agents to configure:",
+    options: AGENT_IDS.map((id) => ({
+      value: id,
+      label: AGENTS[id].name,
+      hint: detected.includes(id) ? "detected" : undefined,
+    })),
+    initialValues: detected.length > 0 ? detected : [...AGENT_IDS],
+    required: false,
+  });
+
+  if (p.isCancel(result)) {
+    p.cancel("Setup cancelled.");
+    process.exit(0);
   }
 
-  console.log("");
+  const selected = (result as AgentId[]).length > 0 ? (result as AgentId[]) : (detected.length > 0 ? detected : [...AGENT_IDS]);
 
-  const defaultNums = detected.map((id) => AGENT_IDS.indexOf(id) + 1);
-  const defaultStr = defaultNums.length > 0 ? defaultNums.join(",") : "all";
-
-  const answer = await prompt(`  Enter numbers (e.g. 1,3,5), 'all', or Enter for [${defaultStr}]: `);
-
-  let selected: AgentId[];
-
-  if (answer === "") {
-    selected = detected.length > 0 ? detected : [...AGENT_IDS];
-  } else if (answer.toLowerCase() === "all") {
-    selected = [...AGENT_IDS];
-  } else {
-    const nums = answer
-      .split(/[,\s]+/)
-      .map(Number)
-      .filter((n) => n >= 1 && n <= AGENT_IDS.length);
-    if (nums.length === 0) {
-      console.log("  No valid selections — using detected agents.");
-      selected = detected.length > 0 ? detected : [...AGENT_IDS];
-    } else {
-      selected = [...new Set(nums.map((n) => AGENT_IDS[n - 1]!))];
-    }
-  }
-
-  console.log(`  Selected: ${selected.map((id) => AGENTS[id].name).join(", ")}`);
-  console.log("");
+  p.log.info(`Selected: ${selected.map((id) => AGENTS[id].name).join(", ")}`);
 
   return selected;
 }
@@ -252,54 +361,67 @@ async function setup(yes: boolean): Promise<void> {
   const sourceDir = import.meta.dirname;
   const projectRoot = process.cwd();
 
-  console.log("");
-  console.log("typegraph-mcp setup");
-  console.log("===================");
-  console.log(`Project: ${projectRoot}`);
-  console.log(`Source:  ${sourceDir}`);
-  console.log("");
+  process.stdout.write("\x1Bc"); // Clear terminal
+  p.intro("TypeGraph MCP Setup");
+
+  p.log.info(`Project: ${projectRoot}`);
 
   // 1. Validate project
   const pkgJsonPath = path.resolve(projectRoot, "package.json");
   const tsconfigPath = path.resolve(projectRoot, "tsconfig.json");
 
   if (!fs.existsSync(pkgJsonPath)) {
-    console.log("  No package.json found in current directory.");
-    console.log("  Run this command from the root of your TypeScript project.");
+    p.cancel("No package.json found. Run this from the root of your TypeScript project.");
     process.exit(1);
   }
 
   if (!fs.existsSync(tsconfigPath)) {
-    console.log("  No tsconfig.json found in current directory.");
-    console.log("  typegraph-mcp requires a TypeScript project with a tsconfig.json.");
+    p.cancel("No tsconfig.json found. typegraph-mcp requires a TypeScript project.");
     process.exit(1);
   }
 
-  console.log("  Found package.json and tsconfig.json");
-  console.log("");
+  p.log.success("Found package.json and tsconfig.json");
 
-  // 2. Agent selection
+  // 2. Check for existing installation
+  const targetDir = path.resolve(projectRoot, PLUGIN_DIR_NAME);
+  const isUpdate = fs.existsSync(targetDir);
+
+  if (isUpdate && !yes) {
+    const action = await p.select({
+      message: `${PLUGIN_DIR_NAME}/ already exists.`,
+      options: [
+        { value: "update", label: "Update", hint: "reinstall plugin files" },
+        { value: "remove", label: "Remove", hint: "uninstall typegraph-mcp from this project" },
+        { value: "exit", label: "Exit", hint: "keep existing installation" },
+      ],
+    });
+
+    if (p.isCancel(action)) {
+      p.cancel("Setup cancelled.");
+      process.exit(0);
+    }
+
+    if (action === "remove") {
+      await removePlugin(projectRoot, targetDir);
+      return;
+    }
+
+    if (action === "exit") {
+      p.outro("No changes made.");
+      return;
+    }
+  }
+
+  // 3. Agent selection
   const selectedAgents = await selectAgents(projectRoot, yes);
 
   const needsPluginSkills = selectedAgents.includes("claude-code") || selectedAgents.includes("cursor");
   const needsAgentsSkills = selectedAgents.some((id) => AGENTS[id].needsAgentsSkills);
 
-  // 3. Build file list and embed plugin into project
-  console.log("── Plugin Installation ──────────────────────────────────────");
+  p.log.step(`Installing to ${PLUGIN_DIR_NAME}/...`);
 
-  const targetDir = path.resolve(projectRoot, PLUGIN_DIR_NAME);
-  const isUpdate = fs.existsSync(targetDir);
-
-  if (isUpdate && !yes) {
-    const overwrite = await confirm(`  ${PLUGIN_DIR_NAME}/ already exists. Update?`);
-    if (!overwrite) {
-      console.log("  Skipped plugin installation (existing copy preserved)");
-      console.log("");
-      await setupAgentInstructions(projectRoot, selectedAgents);
-      await runVerification(targetDir, selectedAgents);
-      return;
-    }
-  }
+  const s = p.spinner();
+  s.start("Copying files...");
 
   // Assemble file list based on selected agents
   const filesToCopy = [...CORE_FILES];
@@ -315,6 +437,7 @@ async function setup(yes: boolean): Promise<void> {
   }
 
   // Copy files
+
   let copied = 0;
   for (const file of filesToCopy) {
     const src = path.join(sourceDir, file);
@@ -323,30 +446,26 @@ async function setup(yes: boolean): Promise<void> {
       copyFile(src, dest);
       copied++;
     } else {
-      console.log(`  Warning: source file not found: ${file}`);
+      p.log.warn(`Source file not found: ${file}`);
     }
   }
 
-  console.log(`  ${isUpdate ? "Updated" : "Installed"} ${copied} files to ${PLUGIN_DIR_NAME}/`);
-
-  // 4. Install dependencies (use npm to avoid pnpm workspace interference)
-  console.log("  Installing dependencies...");
+  s.message("Installing dependencies...");
   try {
     execSync("npm install", { cwd: targetDir, stdio: "pipe" });
-    console.log("  Dependencies installed");
+    s.stop(`${isUpdate ? "Updated" : "Installed"} ${copied} files with dependencies`);
   } catch (err) {
-    console.log(`  Warning: dependency install failed: ${err instanceof Error ? err.message : String(err)}`);
-    console.log("  Run manually: cd " + PLUGIN_DIR_NAME + " && npm install");
+    s.stop(`${isUpdate ? "Updated" : "Installed"} ${copied} files`);
+    p.log.warn(`Dependency install failed: ${err instanceof Error ? err.message : String(err)}`);
+    p.log.info(`Run manually: cd ${PLUGIN_DIR_NAME} && npm install`);
   }
-  console.log("");
 
-  // 5. Copy skills to .agents/skills/ for cross-platform discovery
+  // 4. Copy skills to .agents/skills/ for cross-platform discovery
   if (needsAgentsSkills) {
     const agentsNames = selectedAgents
       .filter((id) => AGENTS[id].needsAgentsSkills)
       .map((id) => AGENTS[id].name);
 
-    console.log("── Cross-Platform Skills ────────────────────────────────────");
     const agentsSkillsDir = path.resolve(projectRoot, ".agents/skills");
     let copiedSkills = 0;
     for (const skill of SKILL_NAMES) {
@@ -364,14 +483,13 @@ async function setup(yes: boolean): Promise<void> {
       copiedSkills++;
     }
     if (copiedSkills > 0) {
-      console.log(`  Copied ${copiedSkills} skills to .agents/skills/ (${agentsNames.join(", ")})`);
+      p.log.success(`Copied ${copiedSkills} skills to .agents/skills/ (${agentsNames.join(", ")})`);
     } else {
-      console.log("  .agents/skills/ already up to date");
+      p.log.info(".agents/skills/ already up to date");
     }
-    console.log("");
   }
 
-  // 6. Remove old .claude/mcp.json entry if Claude Code is selected
+  // 5. Remove old .claude/mcp.json entry if Claude Code is selected
   if (selectedAgents.includes("claude-code")) {
     const mcpJsonPath = path.resolve(projectRoot, ".claude/mcp.json");
     if (fs.existsSync(mcpJsonPath)) {
@@ -380,8 +498,7 @@ async function setup(yes: boolean): Promise<void> {
         if (mcpJson.mcpServers?.["typegraph"]) {
           delete mcpJson.mcpServers["typegraph"];
           fs.writeFileSync(mcpJsonPath, JSON.stringify(mcpJson, null, 2) + "\n");
-          console.log("  Removed old typegraph entry from .claude/mcp.json (plugin handles MCP registration)");
-          console.log("");
+          p.log.info("Removed old typegraph entry from .claude/mcp.json");
         }
       } catch {
         // Ignore parse errors
@@ -389,11 +506,81 @@ async function setup(yes: boolean): Promise<void> {
     }
   }
 
-  // 7. Agent instructions
+  // 6. Agent instructions
   await setupAgentInstructions(projectRoot, selectedAgents);
+
+  // 7. Register MCP server in agent-specific configs
+  registerMcpServers(projectRoot, selectedAgents);
 
   // 8. Verification
   await runVerification(targetDir, selectedAgents);
+}
+
+// ─── Remove Command ──────────────────────────────────────────────────────────
+
+async function removePlugin(projectRoot: string, pluginDir: string): Promise<void> {
+  const s = p.spinner();
+  s.start("Removing typegraph-mcp...");
+
+  // 1. Remove plugin directory
+  if (fs.existsSync(pluginDir)) {
+    fs.rmSync(pluginDir, { recursive: true });
+  }
+
+  // 2. Remove .agents/skills/ entries (only typegraph-mcp skills, not the whole dir)
+  const agentsSkillsDir = path.resolve(projectRoot, ".agents/skills");
+  for (const skill of SKILL_NAMES) {
+    const skillDir = path.join(agentsSkillsDir, skill);
+    if (fs.existsSync(skillDir)) {
+      fs.rmSync(skillDir, { recursive: true });
+    }
+  }
+  // Clean up .agents/skills/ and .agents/ if empty
+  if (fs.existsSync(agentsSkillsDir) && fs.readdirSync(agentsSkillsDir).length === 0) {
+    fs.rmSync(agentsSkillsDir, { recursive: true });
+    const agentsDir = path.resolve(projectRoot, ".agents");
+    if (fs.existsSync(agentsDir) && fs.readdirSync(agentsDir).length === 0) {
+      fs.rmSync(agentsDir, { recursive: true });
+    }
+  }
+
+  // 3. Remove agent instruction snippet from all known agent files
+  const allAgentFiles = AGENT_IDS
+    .map((id) => AGENTS[id].agentFile)
+    .filter((f): f is string => f !== null);
+
+  const seenRealPaths = new Set<string>();
+  for (const agentFile of allAgentFiles) {
+    const filePath = path.resolve(projectRoot, agentFile);
+    if (!fs.existsSync(filePath)) continue;
+    const realPath = fs.realpathSync(filePath);
+    if (seenRealPaths.has(realPath)) continue;
+    seenRealPaths.add(realPath);
+
+    let content = fs.readFileSync(realPath, "utf-8");
+    if (content.includes(SNIPPET_MARKER)) {
+      // Remove the snippet block (from marker to end of the bullet list)
+      content = content.replace(/\n?## TypeScript Navigation \(typegraph-mcp\)\n[\s\S]*?(?=\n## |\n# |$)/, "");
+      // Clean up trailing whitespace
+      content = content.replace(/\n{3,}$/, "\n");
+      fs.writeFileSync(realPath, content);
+    }
+  }
+
+  // 4. Remove --plugin-dir ./plugins/typegraph-mcp from CLAUDE.md
+  const claudeMdPath = path.resolve(projectRoot, "CLAUDE.md");
+  if (fs.existsSync(claudeMdPath)) {
+    let content = fs.readFileSync(claudeMdPath, "utf-8");
+    content = content.replace(/ --plugin-dir \.\/plugins\/typegraph-mcp/g, "");
+    fs.writeFileSync(claudeMdPath, content);
+  }
+
+  s.stop("Removed typegraph-mcp");
+
+  // 5. Deregister MCP server from agent config files
+  deregisterMcpServers(projectRoot);
+
+  p.outro("typegraph-mcp has been uninstalled from this project.");
 }
 
 async function setupAgentInstructions(projectRoot: string, selectedAgents: AgentId[]): Promise<void> {
@@ -406,8 +593,6 @@ async function setupAgentInstructions(projectRoot: string, selectedAgents: Agent
     return; // No agents with instruction files selected (e.g. Cursor only)
   }
 
-  console.log("── Agent Instructions ───────────────────────────────────────");
-
   // Find existing files, resolve symlinks to deduplicate
   const seenRealPaths = new Map<string, string>(); // realPath -> first agentFile name
   const existingFiles: { file: string; realPath: string; hasSnippet: boolean }[] = [];
@@ -418,7 +603,7 @@ async function setupAgentInstructions(projectRoot: string, selectedAgents: Agent
 
     const previousFile = seenRealPaths.get(realPath);
     if (previousFile) {
-      console.log(`  ${agentFile}: same file as ${previousFile} (skipped)`);
+      p.log.info(`${agentFile}: same file as ${previousFile} (skipped)`);
       continue;
     }
     seenRealPaths.set(realPath, agentFile);
@@ -427,16 +612,12 @@ async function setupAgentInstructions(projectRoot: string, selectedAgents: Agent
   }
 
   if (existingFiles.length === 0) {
-    console.log(`  No agent instruction files found (${agentFiles.join(", ")})`);
-    console.log("  Add this snippet to your agent instructions file:");
-    console.log("");
-    console.log(AGENT_SNIPPET.split("\n").map((l) => "    " + l).join("\n"));
+    p.log.warn(`No agent instruction files found (${agentFiles.join(", ")})`);
+    p.note(AGENT_SNIPPET, "Add this snippet to your agent instructions file");
   } else if (existingFiles.some((f) => f.hasSnippet)) {
     for (const f of existingFiles) {
       if (f.hasSnippet) {
-        console.log(`  ${f.file}: already contains typegraph-mcp instructions`);
-      } else {
-        console.log(`  ${f.file}: skipped (instructions already in another file)`);
+        p.log.info(`${f.file}: already has typegraph-mcp instructions`);
       }
     }
   } else {
@@ -444,10 +625,7 @@ async function setupAgentInstructions(projectRoot: string, selectedAgents: Agent
     const content = fs.readFileSync(target.realPath, "utf-8");
     const appendContent = (content.endsWith("\n") ? "" : "\n") + "\n" + AGENT_SNIPPET;
     fs.appendFileSync(target.realPath, appendContent);
-    console.log(`  ${target.file}: appended typegraph-mcp instructions`);
-    for (const f of existingFiles.slice(1)) {
-      console.log(`  ${f.file}: skipped (instructions added to ${target.file})`);
-    }
+    p.log.success(`${target.file}: appended typegraph-mcp instructions`);
   }
 
   // Update --plugin-dir line in CLAUDE.md if Claude Code is selected
@@ -465,31 +643,25 @@ async function setupAgentInstructions(projectRoot: string, selectedAgents: Agent
           `$1${existingFlags} --plugin-dir ./plugins/typegraph-mcp$3`
         );
         fs.writeFileSync(claudeMdPath, content);
-        console.log("  CLAUDE.md: added --plugin-dir ./plugins/typegraph-mcp to plugin loading line");
-      } else if (!match) {
-        // No existing --plugin-dir line found — not an error, just skip
-      } else {
-        console.log("  CLAUDE.md: --plugin-dir already includes typegraph-mcp");
+        p.log.success("CLAUDE.md: added --plugin-dir ./plugins/typegraph-mcp");
+      } else if (match) {
+        p.log.info("CLAUDE.md: --plugin-dir already includes typegraph-mcp");
       }
     }
   }
-
-  console.log("");
 }
 
 async function runVerification(pluginDir: string, selectedAgents: AgentId[]): Promise<void> {
-  console.log("── Verification ─────────────────────────────────────────────");
-  console.log("");
-
   const config = resolveConfig(pluginDir);
 
+  console.log("");
   const { main: checkMain } = await import("./check.js");
   const checkResult = await checkMain(config);
 
   console.log("");
 
   if (checkResult.failed > 0) {
-    console.log("  Health check has failures — fix the issues above before running smoke tests.");
+    p.cancel("Health check has failures — fix the issues above before running smoke tests.");
     process.exit(1);
   }
 
@@ -499,19 +671,40 @@ async function runVerification(pluginDir: string, selectedAgents: AgentId[]): Pr
   console.log("");
 
   if (checkResult.failed === 0 && testResult.failed === 0) {
-    console.log("Setup complete!");
-    console.log("");
     if (selectedAgents.includes("claude-code")) {
-      console.log("  Load the plugin:  claude --plugin-dir ./plugins/typegraph-mcp");
-      console.log("  Or add to your launch command alongside other plugins.");
+      p.outro("Setup complete! Run: claude --plugin-dir ./plugins/typegraph-mcp");
     } else {
-      console.log("  The typegraph-mcp tools are now available to your selected agents.");
+      p.outro("Setup complete! typegraph-mcp tools are now available to your agents.");
     }
-    console.log("");
   } else {
-    console.log("Setup completed with issues. Fix the failures above and re-run.");
+    p.cancel("Setup completed with issues. Fix the failures above and re-run.");
     process.exit(1);
   }
+}
+
+// ─── Remove Command (standalone) ─────────────────────────────────────────────
+
+async function remove(yes: boolean): Promise<void> {
+  const projectRoot = process.cwd();
+  const pluginDir = path.resolve(projectRoot, PLUGIN_DIR_NAME);
+
+  process.stdout.write("\x1Bc");
+  p.intro("TypeGraph MCP Remove");
+
+  if (!fs.existsSync(pluginDir)) {
+    p.cancel("typegraph-mcp is not installed in this project.");
+    process.exit(1);
+  }
+
+  if (!yes) {
+    const confirmed = await p.confirm({ message: "Remove typegraph-mcp from this project?" });
+    if (p.isCancel(confirmed) || !confirmed) {
+      p.cancel("Removal cancelled.");
+      process.exit(0);
+    }
+  }
+
+  await removePlugin(projectRoot, pluginDir);
 }
 
 // ─── Check Command ───────────────────────────────────────────────────────────
@@ -551,6 +744,12 @@ if (help || !command) {
 switch (command) {
   case "setup":
     setup(yes).catch((err) => {
+      console.error("Fatal:", err);
+      process.exit(1);
+    });
+    break;
+  case "remove":
+    remove(yes).catch((err) => {
       console.error("Fatal:", err);
       process.exit(1);
     });
