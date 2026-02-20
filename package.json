@@ -11,7 +11,8 @@
   },
   "scripts": {
     "start": "npx tsx server.ts",
-    "test": "npx tsx test-tools.ts"
+    "test": "npx tsx test-tools.ts",
+    "check": "npx tsx check.ts"
   },
   "devDependencies": {
     "@types/node": "^25.3.0"

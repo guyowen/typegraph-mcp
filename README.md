@@ -222,7 +222,7 @@ Key design choices:
    cd /path/to/ts-nav-mcp && npm install
    ```
 
-4. **Register the MCP server** — add to `.claude/mcp.json` (or equivalent for your agent):
+4. **Register the MCP server** — add to `.claude/mcp.json` in the target project root (or `~/.claude/mcp.json` for global):
    ```json
    {
      "mcpServers": {
@@ -230,7 +230,7 @@ Key design choices:
          "command": "npx",
          "args": ["tsx", "/absolute/path/to/ts-nav-mcp/server.ts"],
          "env": {
-           "TS_NAV_PROJECT_ROOT": "/absolute/path/to/target/project",
+           "TS_NAV_PROJECT_ROOT": ".",
            "TS_NAV_TSCONFIG": "./tsconfig.json"
          }
        }
@@ -238,13 +238,44 @@ Key design choices:
    }
    ```
 
-5. **Restart the agent session** so it picks up the new MCP server.
+   **Important:** `TS_NAV_PROJECT_ROOT` is resolved relative to the agent's working directory (the project root). Use `"."` when the `.claude/mcp.json` lives in the target project. Use an absolute path if configuring globally via `~/.claude/mcp.json`. The `args` path to `server.ts` must always be absolute.
 
-6. **Test** by asking the agent to find a symbol or get type info on any file in the project.
+5. **ESLint configuration** (if the project uses ESLint with `typescript-eslint`):
+
+   The ts-nav-mcp test directory and tools directory are not part of the project's tsconfig, so ESLint's TypeScript parser will fail on them. Add to your ESLint config's `ignores` array:
+   ```javascript
+   // eslint.config.mjs (or equivalent)
+   ignores: [
+     "tools/**",        // ts-nav-mcp and other standalone tools
+     ".ts-nav-test/**", // ts-nav-mcp development test fixtures
+   ]
+   ```
+
+6. **Run the health check** to verify everything is configured correctly:
+   ```bash
+   npx tsx /path/to/ts-nav-mcp/check.ts
+   ```
+   This runs 12 checks covering Node.js version, TypeScript, tsconfig, MCP registration, dependencies, oxc-parser, oxc-resolver, tsserver, module graph, ESLint ignores, and .gitignore. All checks should pass.
+
+7. **Restart the agent session** so it picks up the new MCP server.
+
+8. **Test** by asking the agent to find a symbol or get type info on any file in the project.
 
 ### Monorepo support
 
 For monorepos with TypeScript project references (`composite: true`), point `TS_NAV_TSCONFIG` at the root `tsconfig.json` that includes all project references. tsserver will automatically resolve cross-package imports through declaration maps.
+
+### Troubleshooting
+
+If the MCP server fails to start or tools return errors:
+
+1. Run the health check: `npx tsx /path/to/ts-nav-mcp/check.ts`
+2. Each failing check shows a `Fix:` instruction — follow them in order
+3. Common issues:
+   - **Dependencies not installed**: `cd /path/to/ts-nav-mcp && npm install`
+   - **TypeScript not found**: the target project needs `typescript` as a dependency
+   - **tsconfig.json missing**: create one or update `TS_NAV_TSCONFIG` to point to the correct path
+   - **MCP registration wrong**: verify the `args` path to `server.ts` is absolute and correct
 
 ## License
 
