@@ -310,21 +310,6 @@ Use the `ts_*` MCP tools instead of grep/glob for navigating TypeScript code. Th
 - **Graph queries** (import graph): `ts_dependency_tree`, `ts_dependents`, `ts_import_cycles`, `ts_shortest_path`, `ts_subgraph`, `ts_module_boundary`
 ```
 
-## Troubleshooting
-
-Run the health check first — it catches most issues:
-
-```bash
-npx tsx ~/typegraph-mcp/cli.ts check
-```
-
-| Symptom | Likely cause | Fix |
-|---|---|---|
-| Server won't start | Dependencies missing | `cd /path/to/typegraph-mcp && pnpm install` |
-| "TypeScript not found" | Target project missing TS | Add `typescript` to devDependencies |
-| Tools return empty results | tsconfig misconfigured | Check `TYPEGRAPH_TSCONFIG` points to the right file |
-| MCP registration not found | Wrong path in config | Verify the `args` path to `server.ts` is absolute |
-
 ## Benchmark results
 
 Measured on a 440-file TypeScript monorepo (4 apps, 4 packages, 972 import edges). All scenarios were discovered dynamically from the module graph — no hardcoded symbols.
@@ -391,6 +376,21 @@ TYPEGRAPH_PROJECT_ROOT=/path/to/project npx tsx benchmark.ts
 ```
 
 Scenarios that can't be found in the target codebase (e.g. no barrel files) are gracefully skipped.
+
+## Troubleshooting
+
+Run the health check first — it catches most issues:
+
+```bash
+npx tsx ~/typegraph-mcp/cli.ts check
+```
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| Server won't start | Dependencies missing | `cd /path/to/typegraph-mcp && pnpm install` |
+| "TypeScript not found" | Target project missing TS | Add `typescript` to devDependencies |
+| Tools return empty results | tsconfig misconfigured | Check `TYPEGRAPH_TSCONFIG` points to the right file |
+| MCP registration not found | Wrong path in config | Verify the `args` path to `server.ts` is absolute |
 
 ## Known limitations
 
