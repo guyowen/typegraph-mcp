@@ -32,6 +32,10 @@ const projectRoot = process.env["TS_NAV_PROJECT_ROOT"]
 
 const tsconfigPath = process.env["TS_NAV_TSCONFIG"] || "./tsconfig.json";
 
+// Is ts-nav-mcp embedded inside the project (e.g. tools/ts-nav-mcp/)?
+const toolIsEmbedded = toolDir.startsWith(projectRoot + path.sep);
+const toolRelPath = toolIsEmbedded ? path.relative(projectRoot, toolDir) : toolDir;
+
 // ─── Test Harness ────────────────────────────────────────────────────────────
 
 let passed = 0;
@@ -108,10 +112,7 @@ async function main() {
   if (fs.existsSync(tsconfigAbs)) {
     pass(`tsconfig.json exists at ${tsconfigPath}`);
   } else {
-    fail(
-      `tsconfig.json not found at ${tsconfigPath}`,
-      `Create a tsconfig.json at ${tsconfigPath}`
-    );
+    fail(`tsconfig.json not found at ${tsconfigPath}`, `Create a tsconfig.json at ${tsconfigPath}`);
   }
 
   // 5. MCP registration
@@ -133,22 +134,25 @@ async function main() {
           if (!hasEnv) issues.push("env should set TS_NAV_PROJECT_ROOT and TS_NAV_TSCONFIG");
           fail(
             `MCP registration incomplete: ${issues.join(", ")}`,
-            'See README for correct .claude/mcp.json format'
+            "See README for correct .claude/mcp.json format"
           );
         }
       } else {
+        const serverPath = toolIsEmbedded
+            ? `./${toolRelPath}/server.ts`
+            : path.resolve(toolDir, "server.ts");
         fail(
           "MCP entry 'ts-nav' not found in .claude/mcp.json",
           `Add to .claude/mcp.json:\n` +
-          `    {\n` +
-          `      "mcpServers": {\n` +
-          `        "ts-nav": {\n` +
-          `          "command": "npx",\n` +
-          `          "args": ["tsx", "./tools/ts-nav-mcp/server.ts"],\n` +
-          `          "env": { "TS_NAV_PROJECT_ROOT": ".", "TS_NAV_TSCONFIG": "./tsconfig.json" }\n` +
-          `        }\n` +
-          `      }\n` +
-          `    }`
+            `    {\n` +
+            `      "mcpServers": {\n` +
+            `        "ts-nav": {\n` +
+            `          "command": "npx",\n` +
+            `          "args": ["tsx", "${serverPath}"],\n` +
+            `          "env": { "TS_NAV_PROJECT_ROOT": ".", "TS_NAV_TSCONFIG": "./tsconfig.json" }\n` +
+            `        }\n` +
+            `      }\n` +
+            `    }`
         );
       }
     } catch (err) {
@@ -158,10 +162,7 @@ async function main() {
       );
     }
   } else {
-    fail(
-      ".claude/mcp.json not found",
-      `Create .claude/mcp.json with ts-nav server registration`
-    );
+    fail(".claude/mcp.json not found", `Create .claude/mcp.json with ts-nav server registration`);
   }
 
   // 6. ts-nav-mcp dependencies installed
@@ -174,16 +175,10 @@ async function main() {
     if (missing.length === 0) {
       pass(`Dependencies installed (${requiredPkgs.length} packages)`);
     } else {
-      fail(
-        `Missing packages: ${missing.join(", ")}`,
-        "Run `cd tools/ts-nav-mcp && pnpm install`"
-      );
+      fail(`Missing packages: ${missing.join(", ")}`, `Run \`cd ${toolRelPath} && pnpm install\``);
     }
   } else {
-    fail(
-      "ts-nav-mcp dependencies not installed",
-      "Run `cd tools/ts-nav-mcp && pnpm install`"
-    );
+    fail("ts-nav-mcp dependencies not installed", `Run \`cd ${toolRelPath} && pnpm install\``);
   }
 
   // 7. oxc-parser smoke test
@@ -196,13 +191,13 @@ async function main() {
     } else {
       fail(
         "oxc-parser parseSync returned unexpected result",
-        "Reinstall: `cd tools/ts-nav-mcp && rm -rf node_modules && pnpm install`"
+        `Reinstall: \`cd ${toolRelPath} && rm -rf node_modules && pnpm install\``
       );
     }
   } catch (err) {
     fail(
       `oxc-parser failed: ${err instanceof Error ? err.message : String(err)}`,
-      "Reinstall: `cd tools/ts-nav-mcp && rm -rf node_modules && pnpm install`"
+      `Reinstall: \`cd ${toolRelPath} && rm -rf node_modules && pnpm install\``
     );
   }
 
@@ -237,7 +232,7 @@ async function main() {
   } catch (err) {
     fail(
       `oxc-resolver failed: ${err instanceof Error ? err.message : String(err)}`,
-      "Reinstall: `cd tools/ts-nav-mcp && rm -rf node_modules && pnpm install`"
+      `Reinstall: \`cd ${toolRelPath} && rm -rf node_modules && pnpm install\``
     );
   }
 
@@ -293,39 +288,51 @@ async function main() {
     );
   }
 
-  // 11. ESLint ignores (optional)
-  const eslintConfigPath = path.resolve(projectRoot, "eslint.config.mjs");
-  if (fs.existsSync(eslintConfigPath)) {
-    const eslintContent = fs.readFileSync(eslintConfigPath, "utf-8");
-    const hasToolsIgnore = /["']tools\/\*\*["']/.test(eslintContent);
-    const hasTestIgnore = /["']\.ts-nav-test\/\*\*["']/.test(eslintContent);
+  // 11. ESLint ignores (only when ts-nav-mcp is embedded inside the project)
+  if (toolIsEmbedded) {
+    const eslintConfigPath = path.resolve(projectRoot, "eslint.config.mjs");
+    if (fs.existsSync(eslintConfigPath)) {
+      const eslintContent = fs.readFileSync(eslintConfigPath, "utf-8");
+      const hasToolsIgnore = /["']tools\/\*\*["']/.test(eslintContent);
+      const hasTestIgnore = /["']\.ts-nav-test\/\*\*["']/.test(eslintContent);
 
-    if (hasToolsIgnore && hasTestIgnore) {
-      pass('ESLint ignores tools/ and .ts-nav-test/');
+      if (hasToolsIgnore && hasTestIgnore) {
+        pass("ESLint ignores tools/ and .ts-nav-test/");
+      } else {
+        const missing: string[] = [];
+        if (!hasToolsIgnore) missing.push('"tools/**"');
+        if (!hasTestIgnore) missing.push('".ts-nav-test/**"');
+        fail(
+          `ESLint missing ignores: ${missing.join(", ")}`,
+          `Add to the ignores array in eslint.config.mjs:\n` +
+            missing.map((m) => `    ${m},`).join("\n")
+        );
+      }
     } else {
-      const missing: string[] = [];
-      if (!hasToolsIgnore) missing.push('"tools/**"');
-      if (!hasTestIgnore) missing.push('".ts-nav-test/**"');
-      fail(
-        `ESLint missing ignores: ${missing.join(", ")}`,
-        `Add to the ignores array in eslint.config.mjs:\n` +
-        missing.map((m) => `    ${m},`).join("\n")
-      );
+      skip("ESLint config check (no eslint.config.mjs)");
     }
   } else {
-    skip("ESLint config check (no eslint.config.mjs)");
+    skip("ESLint config check (ts-nav-mcp is external to project)");
   }
 
   // 12. .gitignore check (optional)
   const gitignorePath = path.resolve(projectRoot, ".gitignore");
   if (fs.existsSync(gitignorePath)) {
     const gitignoreContent = fs.readFileSync(gitignorePath, "utf-8");
-    const lines = gitignoreContent.split("\n").map((l) => l.trim()).filter((l) => l && !l.startsWith("#"));
-    const ignoresTools = lines.some((l) => l === "tools/" || l === "tools" || l === "/tools");
-    const ignoresClaude = lines.some((l) => l === ".claude/" || l === ".claude" || l === "/.claude");
+    const lines = gitignoreContent
+      .split("\n")
+      .map((l: string) => l.trim())
+      .filter((l: string) => l && !l.startsWith("#"));
+    const ignoresClaude = lines.some(
+      (l: string) => l === ".claude/" || l === ".claude" || l === "/.claude"
+    );
+
+    // Only check tools/ exclusion when ts-nav-mcp is embedded
+    const ignoresTools = toolIsEmbedded &&
+      lines.some((l: string) => l === "tools/" || l === "tools" || l === "/tools");
 
     if (!ignoresTools && !ignoresClaude) {
-      pass(".gitignore does not exclude .claude/ or tools/");
+      pass(".gitignore does not exclude .claude/" + (toolIsEmbedded ? " or tools/" : ""));
     } else {
       const excluded: string[] = [];
       if (ignoresTools) excluded.push("tools/");
@@ -346,14 +353,14 @@ async function main() {
   if (failed === 0) {
     console.log(
       `${passed}/${total} checks passed` +
-      (warned > 0 ? ` (${warned} warning${warned > 1 ? "s" : ""})` : "") +
-      " -- ts-nav-mcp is ready"
+        (warned > 0 ? ` (${warned} warning${warned > 1 ? "s" : ""})` : "") +
+        " -- ts-nav-mcp is ready"
     );
   } else {
     console.log(
       `${passed}/${total} checks passed, ${failed} failed` +
-      (warned > 0 ? `, ${warned} warning${warned > 1 ? "s" : ""}` : "") +
-      " -- fix issues above"
+        (warned > 0 ? `, ${warned} warning${warned > 1 ? "s" : ""}` : "") +
+        " -- fix issues above"
     );
   }
   console.log("");
