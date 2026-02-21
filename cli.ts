@@ -709,17 +709,29 @@ async function remove(yes: boolean): Promise<void> {
 
 // ─── Check Command ───────────────────────────────────────────────────────────
 
+function resolvePluginDir(): string {
+  // Prefer the installed plugin in the user's project over the npx cache
+  const installed = path.resolve(process.cwd(), PLUGIN_DIR_NAME);
+  if (fs.existsSync(installed)) return installed;
+  // Fall back to the source directory (running from the repo itself)
+  return path.basename(import.meta.dirname) === "dist"
+    ? path.resolve(import.meta.dirname, "..")
+    : import.meta.dirname;
+}
+
 async function check(): Promise<void> {
+  const config = resolveConfig(resolvePluginDir());
   const { main: checkMain } = await import("./check.js");
-  const result = await checkMain();
+  const result = await checkMain(config);
   process.exit(result.failed > 0 ? 1 : 0);
 }
 
 // ─── Test Command ────────────────────────────────────────────────────────────
 
 async function test(): Promise<void> {
+  const config = resolveConfig(resolvePluginDir());
   const { main: testMain } = await import("./smoke-test.js");
-  const result = await testMain();
+  const result = await testMain(config);
   process.exit(result.failed > 0 ? 1 : 0);
 }
 
