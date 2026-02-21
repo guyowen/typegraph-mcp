@@ -335,7 +335,13 @@ export async function main(configOverride?: TypegraphConfig): Promise<CheckResul
 
   // 10. Module graph build test
   try {
-    const { buildGraph } = await import(path.resolve(toolDir, "module-graph.js"));
+    let buildGraph: (root: string, tsconfig: string) => Promise<{ graph: { files: Set<string>; forward: Map<string, unknown[]> } }>;
+    try {
+      ({ buildGraph } = await import(path.resolve(toolDir, "module-graph.js")));
+    } catch {
+      // Fallback: plugin dir has .ts files only (no tsx at runtime), use the co-bundled version
+      ({ buildGraph } = await import("./module-graph.js"));
+    }
     const start = performance.now();
     const { graph } = await buildGraph(projectRoot, tsconfigPath);
     const elapsed = (performance.now() - start).toFixed(0);
