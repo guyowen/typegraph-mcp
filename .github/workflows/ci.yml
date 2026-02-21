@@ -42,7 +42,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          registry-url: https://registry.npmjs.org
+
+      - name: Upgrade npm for OIDC support
+        run: npm install -g npm@latest
 
       - run: npm ci
 
@@ -62,5 +64,3 @@ jobs:
 
       - name: Publish to npm
         run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ""
