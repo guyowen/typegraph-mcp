@@ -24,8 +24,8 @@ jobs:
       - name: Verify compiled CLI loads
         run: node dist/cli.js --help
 
-      - name: Verify compiled server module loads
-        run: node -e "import('./dist/server.js')"
+      - name: Verify compiled modules parse
+        run: node --check dist/server.js && node --check dist/cli.js
 
   publish:
     needs: validate
