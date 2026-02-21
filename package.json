@@ -9,8 +9,8 @@
     "url": "https://github.com/guyowen/typegraph-mcp.git"
   },
   "bin": {
-    "typegraph-mcp": "./cli.ts",
-    "typegraph": "./cli.ts"
+    "typegraph-mcp": "./dist/cli.js",
+    "typegraph": "./dist/cli.js"
   },
   "files": [
     "*.ts",
@@ -24,9 +24,11 @@
     "scripts/",
     ".claude-plugin/",
     ".cursor-plugin/",
-    "gemini-extension.json"
+    "gemini-extension.json",
+    "dist/"
   ],
   "scripts": {
+    "build": "tsup",
     "start": "tsx server.ts",
     "test": "tsx smoke-test.ts",
     "check": "tsx check.ts"
@@ -39,6 +41,13 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
-    "@types/node": "^25.3.0"
+    "@types/node": "^25.3.0",
+    "tsup": "^8.5.0",
+    "typescript": "^5.8.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
   }
 }

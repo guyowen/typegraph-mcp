@@ -356,7 +356,9 @@ async function selectAgents(projectRoot: string, yes: boolean): Promise<AgentId[
 // ─── Setup Command ───────────────────────────────────────────────────────────
 
 async function setup(yes: boolean): Promise<void> {
-  const sourceDir = import.meta.dirname;
+  const sourceDir = path.basename(import.meta.dirname) === "dist"
+    ? path.resolve(import.meta.dirname, "..")
+    : import.meta.dirname;
   const projectRoot = process.cwd();
 
   process.stdout.write("\x1Bc"); // Clear terminal

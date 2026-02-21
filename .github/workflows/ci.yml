@@ -22,8 +22,11 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - name: Verify CLI loads
-        run: npx tsx cli.ts --help
+      - name: Build
+        run: pnpm build
+
+      - name: Verify compiled CLI loads
+        run: node dist/cli.js --help
 
       - name: Verify core modules resolve
         run: npx tsx -e "await import('./server.ts')"
@@ -45,6 +48,9 @@ jobs:
           version: 10
 
       - run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
 
       - name: Check if version already published
         id: version-check
