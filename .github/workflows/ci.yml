@@ -24,8 +24,8 @@ jobs:
       - name: Verify compiled CLI loads
         run: node dist/cli.js --help
 
-      - name: Verify core modules resolve
-        run: npx tsx -e "await import('./server.ts')"
+      - name: Verify compiled server module loads
+        run: node -e "import('./dist/server.js')"
 
   publish:
     needs: validate
