@@ -2,7 +2,12 @@
   "name": "typegraph-mcp",
   "version": "0.9.0",
   "description": "Type-aware codebase navigation for AI coding agents — 14 MCP tools powered by tsserver + oxc",
+  "license": "MIT",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/guyowen/typegraph-mcp.git"
+  },
   "bin": {
     "typegraph-mcp": "./cli.ts",
     "typegraph": "./cli.ts"
