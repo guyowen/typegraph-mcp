@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Verify CLI loads
+        run: npx tsx cli.ts --help
+
+      - name: Verify core modules resolve
+        run: npx tsx -e "await import('./server.ts')"
+
+  publish:
+    needs: validate
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Check if version already published
+        id: version-check
+        run: |
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+          if npm view "typegraph-mcp@${PACKAGE_VERSION}" version 2>/dev/null; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Version ${PACKAGE_VERSION} already published — skipping"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "Version ${PACKAGE_VERSION} not found on npm — will publish"
+          fi
+
+      - name: Publish to npm
+        if: steps.version-check.outputs.exists == 'false'
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
