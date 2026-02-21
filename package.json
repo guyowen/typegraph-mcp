@@ -1,6 +1,6 @@
 {
   "name": "typegraph-mcp",
-  "version": "1.0.0",
+  "version": "0.9.0",
   "description": "Type-aware codebase navigation for AI coding agents — 14 MCP tools powered by tsserver + oxc",
   "type": "module",
   "bin": {

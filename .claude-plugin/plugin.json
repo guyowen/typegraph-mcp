@@ -1,11 +1,11 @@
 {
   "name": "typegraph",
-  "version": "1.0.0",
+  "version": "0.9.0",
   "description": "Type-aware TypeScript navigation — 14 MCP tools for go-to-definition, find-references, dependency graphs, cycle detection, and impact analysis",
   "author": {
     "name": "Owen Jones"
   },
-  "repository": "https://github.com/ojonesjr/typegraph-mcp",
+  "repository": "https://github.com/guyowen/typegraph-mcp",
   "license": "MIT",
   "keywords": [
     "typescript",

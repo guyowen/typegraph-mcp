@@ -47,7 +47,7 @@ Agent: ts_trace_chain({ file: "src/handlers.ts", symbol: "createUser" })
 
 ```bash
 # Clone and install
-git clone https://github.com/ojonesjr/typegraph-mcp.git ~/typegraph-mcp
+git clone https://github.com/guyowen/typegraph-mcp.git ~/typegraph-mcp
 cd ~/typegraph-mcp && pnpm install
 
 # Load the plugin
@@ -64,7 +64,7 @@ The plugin auto-configures everything:
 
 ```bash
 # Clone and install
-git clone https://github.com/ojonesjr/typegraph-mcp.git ~/typegraph-mcp
+git clone https://github.com/guyowen/typegraph-mcp.git ~/typegraph-mcp
 cd ~/typegraph-mcp && pnpm install
 
 # Run setup from your project root
