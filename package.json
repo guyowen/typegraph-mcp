@@ -9,7 +9,17 @@
   },
   "files": [
     "*.ts",
-    "README.md"
+    "*.json",
+    "README.md",
+    "LICENSE",
+    "pnpm-lock.yaml",
+    "skills/",
+    "commands/",
+    "hooks/",
+    "scripts/",
+    ".claude-plugin/",
+    ".cursor-plugin/",
+    "gemini-extension.json"
   ],
   "scripts": {
     "start": "tsx server.ts",
