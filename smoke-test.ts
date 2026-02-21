@@ -363,7 +363,12 @@ export async function main(configOverride?: TypegraphConfig): Promise<SmokeTestR
 
     // type_info
     t0 = performance.now();
-    const info = await client.quickinfo(testFileRel, span.start.line, span.start.offset);
+    let info = await client.quickinfo(testFileRel, span.start.line, span.start.offset);
+    // Span start may point to a keyword (class, function) — retry at the name position
+    if (!info && defs.length > 0) {
+      const def = defs[0]!;
+      info = await client.quickinfo(testFileRel, def.start.line, def.start.offset);
+    }
     if (info) {
       const typeStr =
         info.displayString.length > 80
