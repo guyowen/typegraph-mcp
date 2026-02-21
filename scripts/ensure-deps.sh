@@ -20,13 +20,10 @@ fi
 echo "Installing typegraph-mcp dependencies..."
 cd "$PLUGIN_DIR"
 
-# Prefer pnpm, fall back to npm
-if command -v pnpm &> /dev/null; then
-  pnpm install --frozen-lockfile 2>/dev/null || pnpm install
-elif command -v npm &> /dev/null; then
+if command -v npm &> /dev/null; then
   npm install
 else
-  echo "Warning: Neither pnpm nor npm found. Run 'npm install' in $PLUGIN_DIR manually."
+  echo "Warning: npm not found. Run 'npm install' in $PLUGIN_DIR manually."
   exit 1
 fi
 

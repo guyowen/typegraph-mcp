@@ -48,7 +48,7 @@ Agent: ts_trace_chain({ file: "src/handlers.ts", symbol: "createUser" })
 ```bash
 # Clone and install
 git clone https://github.com/guyowen/typegraph-mcp.git ~/typegraph-mcp
-cd ~/typegraph-mcp && pnpm install
+cd ~/typegraph-mcp && npm install
 
 # Load the plugin
 claude --plugin-dir ~/typegraph-mcp
@@ -65,7 +65,7 @@ The plugin auto-configures everything:
 ```bash
 # Clone and install
 git clone https://github.com/guyowen/typegraph-mcp.git ~/typegraph-mcp
-cd ~/typegraph-mcp && pnpm install
+cd ~/typegraph-mcp && npm install
 
 # Run setup from your project root
 cd /path/to/your-ts-project
@@ -115,7 +115,7 @@ First query takes ~2s (tsserver warmup). Subsequent queries: 1–60ms.
 
 - **Node.js** >= 18
 - **TypeScript** >= 5.0 in the target project (`node_modules`)
-- **pnpm** (or npm) for installing typegraph-mcp dependencies
+- **npm** for installing typegraph-mcp dependencies
 
 ## CLI
 
@@ -435,7 +435,7 @@ npx tsx ~/typegraph-mcp/cli.ts check
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| Server won't start | Dependencies missing | `cd /path/to/typegraph-mcp && pnpm install` |
+| Server won't start | Dependencies missing | `cd /path/to/typegraph-mcp && npm install` |
 | "TypeScript not found" | Target project missing TS | Add `typescript` to devDependencies |
 | Tools return empty results | tsconfig misconfigured | Check `TYPEGRAPH_TSCONFIG` points to the right file |
 | MCP registration not found | Wrong path in config | Verify the `args` path to `server.ts` is absolute |

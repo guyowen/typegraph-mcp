@@ -16,14 +16,10 @@ jobs:
         with:
           node-version: 22
 
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10
-
-      - run: pnpm install --frozen-lockfile
+      - run: npm ci
 
       - name: Build
-        run: pnpm build
+        run: npm run build
 
       - name: Verify compiled CLI loads
         run: node dist/cli.js --help
@@ -43,14 +39,10 @@ jobs:
           node-version: 22
           registry-url: https://registry.npmjs.org
 
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10
-
-      - run: pnpm install --frozen-lockfile
+      - run: npm ci
 
       - name: Build
-        run: pnpm build
+        run: npm run build
 
       - name: Check if version already published
         id: version-check

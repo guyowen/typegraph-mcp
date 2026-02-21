@@ -6,7 +6,7 @@
  *   npx tsx plugins/typegraph-mcp/check.ts
  *
  * Or from plugins/typegraph-mcp/:
- *   pnpm check
+ *   npm run check
  */
 
 import * as fs from "node:fs";
@@ -170,7 +170,7 @@ export async function main(configOverride?: TypegraphConfig): Promise<CheckResul
   } catch {
     fail(
       "TypeScript not found in project",
-      "Add `typescript` to devDependencies and run `pnpm install`"
+      "Add `typescript` to devDependencies and run `npm install`"
     );
   }
 
@@ -251,10 +251,10 @@ export async function main(configOverride?: TypegraphConfig): Promise<CheckResul
     if (missing.length === 0) {
       pass(`Dependencies installed (${requiredPkgs.length} packages)`);
     } else {
-      fail(`Missing packages: ${missing.join(", ")}`, `Run \`cd ${toolRelPath} && pnpm install\``);
+      fail(`Missing packages: ${missing.join(", ")}`, `Run \`cd ${toolRelPath} && npm install\``);
     }
   } else {
-    fail("typegraph-mcp dependencies not installed", `Run \`cd ${toolRelPath} && pnpm install\``);
+    fail("typegraph-mcp dependencies not installed", `Run \`cd ${toolRelPath} && npm install\``);
   }
 
   // 7. oxc-parser smoke test
@@ -267,13 +267,13 @@ export async function main(configOverride?: TypegraphConfig): Promise<CheckResul
     } else {
       fail(
         "oxc-parser parseSync returned unexpected result",
-        `Reinstall: \`cd ${toolRelPath} && rm -rf node_modules && pnpm install\``
+        `Reinstall: \`cd ${toolRelPath} && rm -rf node_modules && npm install\``
       );
     }
   } catch (err) {
     fail(
       `oxc-parser failed: ${err instanceof Error ? err.message : String(err)}`,
-      `Reinstall: \`cd ${toolRelPath} && rm -rf node_modules && pnpm install\``
+      `Reinstall: \`cd ${toolRelPath} && rm -rf node_modules && npm install\``
     );
   }
 
@@ -307,7 +307,7 @@ export async function main(configOverride?: TypegraphConfig): Promise<CheckResul
   } catch (err) {
     fail(
       `oxc-resolver failed: ${err instanceof Error ? err.message : String(err)}`,
-      `Reinstall: \`cd ${toolRelPath} && rm -rf node_modules && pnpm install\``
+      `Reinstall: \`cd ${toolRelPath} && rm -rf node_modules && npm install\``
     );
   }
 

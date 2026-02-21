@@ -17,7 +17,7 @@
     "*.json",
     "README.md",
     "LICENSE",
-    "pnpm-lock.yaml",
+    "package-lock.json",
     "skills/",
     "commands/",
     "hooks/",
@@ -44,10 +44,5 @@
     "@types/node": "^25.3.0",
     "tsup": "^8.5.0",
     "typescript": "^5.8.0"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "esbuild"
-    ]
   }
 }

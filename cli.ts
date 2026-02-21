@@ -111,7 +111,7 @@ const CORE_FILES = [
   "smoke-test.ts",
   "cli.ts",
   "package.json",
-  "pnpm-lock.yaml",
+  "package-lock.json",
 ];
 
 /** Skill files inside plugin dir (Claude Code + Cursor discover from skills/) */
