@@ -484,17 +484,3 @@ export async function main(configOverride?: TypegraphConfig): Promise<SmokeTestR
   return { passed, failed, skipped };
 }
 
-// ─── Self-run guard ──────────────────────────────────────────────────────────
-
-const isDirectRun =
-  process.argv[1] &&
-  fs.realpathSync(process.argv[1]) === fs.realpathSync(new URL(import.meta.url).pathname);
-
-if (isDirectRun) {
-  main()
-    .then((result) => process.exit(result.failed > 0 ? 1 : 0))
-    .catch((err) => {
-      console.error("Fatal:", err);
-      process.exit(1);
-    });
-}
