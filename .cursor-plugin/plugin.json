@@ -1,6 +1,6 @@
 {
   "name": "typegraph",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "description": "Type-aware TypeScript navigation — 14 MCP tools for go-to-definition, find-references, dependency graphs, cycle detection, and impact analysis",
   "author": {
     "name": "Owen Jones"
