@@ -43,7 +43,14 @@ Agent: ts_trace_chain({ file: "src/handlers.ts", symbol: "createUser" })
 
 ## Quick start
 
-### Option A: Claude Code plugin (recommended)
+### Option A: npm (recommended)
+
+```bash
+cd /path/to/your-ts-project
+npx typegraph-mcp setup
+```
+
+### Option B: Claude Code plugin
 
 ```bash
 # Clone and install
@@ -60,7 +67,7 @@ The plugin auto-configures everything:
 - `/typegraph:check` and `/typegraph:test` commands available in-session
 - SessionStart hook verifies dependencies are installed
 
-### Option B: CLI setup (all agents)
+### Option C: CLI setup (from source)
 
 ```bash
 # Clone and install
@@ -72,7 +79,7 @@ cd /path/to/your-ts-project
 npx tsx ~/typegraph-mcp/cli.ts setup
 ```
 
-The interactive `setup` command:
+The interactive `setup` command (Options A and C):
 1. Auto-detects which AI agents you use (Claude Code, Cursor, Codex CLI, Gemini CLI, GitHub Copilot)
 2. Copies the plugin into `./plugins/typegraph-mcp/` and installs dependencies
 3. Registers the MCP server in each agent's config file (`.mcp.json`, `.cursor/mcp.json`, `.codex/config.toml`, `.vscode/mcp.json`)
