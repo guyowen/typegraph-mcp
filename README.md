@@ -456,7 +456,3 @@ npx tsx ~/typegraph-mcp/cli.ts check
 - **Object literal property keys** (e.g., RPC handler names) are not indexed by tsserver's `navto`. Use `ts_find_symbol` with a specific file, or pass the `file` hint to `ts_navigate_to`.
 - **First query latency** — ~2s as tsserver loads the project. Subsequent queries are 1–60ms.
 - **Memory** — tsserver holds the project in memory. For very large monorepos (1000+ files), expect ~200–500MB RSS.
-
-## License
-
-MIT
