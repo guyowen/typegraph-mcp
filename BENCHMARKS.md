@@ -56,4 +56,6 @@ The benchmark is fully dynamic — it discovers scenarios from the module graph,
 npx typegraph-mcp bench
 ```
 
+In Claude Code: `/typegraph:bench`
+
 Scenarios that can't be found in the target codebase (e.g. no barrel files) are gracefully skipped.
