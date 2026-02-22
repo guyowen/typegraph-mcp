@@ -183,6 +183,53 @@ Two subsystems start concurrently:
 
 **Monorepo support** — resolves through `composite` project references, maps `dist/` back to source, handles `extensionAlias` for `.js` → `.ts` mapping, and follows cross-package barrel re-exports.
 
+## Contributing
+
+### Setup from source
+
+```bash
+git clone https://github.com/guyowen/typegraph-mcp.git
+cd typegraph-mcp
+npm install
+```
+
+### Run locally against a project
+
+```bash
+cd /path/to/your-ts-project
+npx tsx ~/typegraph-mcp/cli.ts setup
+```
+
+Or start the MCP server directly:
+
+```bash
+TYPEGRAPH_PROJECT_ROOT=/path/to/project TYPEGRAPH_TSCONFIG=/path/to/project/tsconfig.json npx tsx ~/typegraph-mcp/server.ts
+```
+
+### Load as a Claude Code plugin (from source)
+
+```bash
+claude --plugin-dir ~/typegraph-mcp
+```
+
+### Verify your changes
+
+```bash
+npx tsx ~/typegraph-mcp/cli.ts check    # 12 health checks
+npx tsx ~/typegraph-mcp/cli.ts test     # smoke test all 14 tools
+```
+
+### Build compiled output
+
+```bash
+npm run build    # compiles to dist/ via tsup
+```
+
+### Branch workflow
+
+- **`dev`** — all work happens here
+- **`main`** — merge to main triggers CI: auto-bumps patch version, publishes to npm via OIDC trusted publishers
+
 ## Known limitations
 
 - **Object literal property keys** (e.g., RPC handler names) are not indexed by tsserver's `navto`. Use `ts_find_symbol` with a specific file, or pass the `file` hint to `ts_navigate_to`.
