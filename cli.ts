@@ -337,7 +337,7 @@ function ensureTsconfigExclude(projectRoot: string): void {
       // Existing exclude array — append to it
       const updated = raw.replace(
         /("exclude"\s*:\s*\[)([\s\S]*?)(\])/,
-        (match, open, items, close) => {
+        (_match, open, items, close) => {
           const trimmed = items.trimEnd();
           const needsComma = trimmed.length > 0 && !trimmed.endsWith(",");
           return `${open}${items.trimEnd()}${needsComma ? "," : ""}\n    "plugins/**"${close}`;
