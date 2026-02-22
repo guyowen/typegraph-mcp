@@ -724,9 +724,9 @@ async function runVerification(pluginDir: string, selectedAgents: AgentId[]): Pr
 
   if (checkResult.failed === 0 && testResult.failed === 0) {
     if (selectedAgents.includes("claude-code")) {
-      p.outro("Setup complete! Run: claude --plugin-dir ./plugins/typegraph-mcp");
+      p.outro("Setup complete! Run: claude --plugin-dir ./plugins/typegraph-mcp\n  Slash commands: /typegraph:check, /typegraph:test, /typegraph:bench");
     } else {
-      p.outro("Setup complete! typegraph-mcp tools are now available to your agents.");
+      p.outro("Setup complete! typegraph-mcp tools are now available to your agents.\n  CLI: npx typegraph-mcp check | test | bench");
     }
   } else {
     p.cancel("Setup completed with issues. Fix the failures above and re-run.");

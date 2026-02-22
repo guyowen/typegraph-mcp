@@ -46,7 +46,7 @@ cd ~/typegraph-mcp && npm install
 claude --plugin-dir ~/typegraph-mcp
 ```
 
-Auto-configures MCP server, 5 workflow skills, `/typegraph:check` and `/typegraph:test` commands, and a SessionStart hook for dependency verification.
+Auto-configures MCP server, 5 workflow skills, `/typegraph:check`, `/typegraph:test`, and `/typegraph:bench` commands, and a SessionStart hook for dependency verification.
 
 ### Restart your agent session
 
