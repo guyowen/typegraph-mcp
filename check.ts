@@ -371,8 +371,10 @@ export async function main(configOverride?: TypegraphConfig): Promise<CheckResul
 
   // 11. ESLint ignores (only when typegraph-mcp is embedded inside the project)
   if (toolIsEmbedded) {
-    const eslintConfigPath = path.resolve(projectRoot, "eslint.config.mjs");
-    if (fs.existsSync(eslintConfigPath)) {
+    const eslintConfigNames = ["eslint.config.mjs", "eslint.config.js", "eslint.config.ts", "eslint.config.cjs"];
+    const eslintConfigFile = eslintConfigNames.find((name) => fs.existsSync(path.resolve(projectRoot, name)));
+    if (eslintConfigFile) {
+      const eslintConfigPath = path.resolve(projectRoot, eslintConfigFile);
       const eslintContent = fs.readFileSync(eslintConfigPath, "utf-8");
       // Determine the parent directory (e.g. "plugins") for the ignore pattern
       const parentDir = path.basename(path.dirname(toolDir));
@@ -384,11 +386,11 @@ export async function main(configOverride?: TypegraphConfig): Promise<CheckResul
       } else {
         fail(
           `ESLint missing ignore: "${parentDir}/**"`,
-          `Add to the ignores array in eslint.config.mjs:\n    "${parentDir}/**",`
+          `Add to the ignores array in ${eslintConfigFile}:\n    "${parentDir}/**",`
         );
       }
     } else {
-      skip("ESLint config check (no eslint.config.mjs)");
+      skip("ESLint config check (no eslint flat config found)");
     }
   } else {
     skip("ESLint config check (typegraph-mcp is external to project)");

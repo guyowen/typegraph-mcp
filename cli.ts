@@ -362,6 +362,51 @@ function ensureTsconfigExclude(projectRoot: string): void {
   }
 }
 
+// ─── ESLint Ignore ───────────────────────────────────────────────────────────
+
+function ensureEslintIgnore(projectRoot: string): void {
+  const eslintConfigNames = ["eslint.config.mjs", "eslint.config.js", "eslint.config.ts", "eslint.config.cjs"];
+  const eslintConfigFile = eslintConfigNames.find((name) => fs.existsSync(path.resolve(projectRoot, name)));
+  if (!eslintConfigFile) return;
+  const eslintConfigPath = path.resolve(projectRoot, eslintConfigFile);
+
+  try {
+    const raw = fs.readFileSync(eslintConfigPath, "utf-8");
+    const pattern = /["']plugins\/\*\*["']/;
+    if (pattern.test(raw)) return; // Already ignored
+
+    // Strategy 1: Append to an existing ignores array
+    const ignoresArrayRe = /(ignores\s*:\s*\[)([\s\S]*?)(\])/;
+    const match = raw.match(ignoresArrayRe);
+    if (match) {
+      const updated = raw.replace(ignoresArrayRe, (_m, open, items, close) => {
+        const trimmed = items.trimEnd();
+        const needsComma = trimmed.length > 0 && !trimmed.endsWith(",");
+        return `${open}${items.trimEnd()}${needsComma ? "," : ""} "plugins/**"${close}`;
+      });
+      fs.writeFileSync(eslintConfigPath, updated);
+      p.log.success(`Added "plugins/**" to ${eslintConfigFile} ignores`);
+      return;
+    }
+
+    // Strategy 2: Insert a new ignores object at the start of the exported array
+    // Matches: export default [ or export default tseslint.config(
+    const exportArrayRe = /(export\s+default\s+(?:\w+\.config\(|\[))\s*\n?/;
+    if (exportArrayRe.test(raw)) {
+      const updated = raw.replace(exportArrayRe, (m) => {
+        return `${m}  { ignores: ["plugins/**"] },\n`;
+      });
+      fs.writeFileSync(eslintConfigPath, updated);
+      p.log.success(`Added "plugins/**" to ${eslintConfigFile} ignores`);
+      return;
+    }
+
+    p.log.warn(`Could not patch ${eslintConfigFile} — manually add "plugins/**" to the ignores array`);
+  } catch {
+    p.log.warn(`Could not update ${eslintConfigFile} — manually add "plugins/**" to the ignores array`);
+  }
+}
+
 // ─── Agent Selection ─────────────────────────────────────────────────────────
 
 function detectAgents(projectRoot: string): AgentId[] {
@@ -564,7 +609,10 @@ async function setup(yes: boolean): Promise<void> {
   // 8. Ensure plugins/ is excluded from tsconfig
   ensureTsconfigExclude(projectRoot);
 
-  // 9. Verification
+  // 9. Ensure plugins/ is ignored by ESLint
+  ensureEslintIgnore(projectRoot);
+
+  // 10. Verification
   await runVerification(targetDir, selectedAgents);
 }
 
