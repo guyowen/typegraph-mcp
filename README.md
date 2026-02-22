@@ -59,32 +59,26 @@ Agent: ts_trace_chain({ file: "src/handlers.ts", symbol: "createUser" })
 
 ## Quick start
 
+### Step 1: Install
+
 ```bash
 cd /path/to/your-ts-project
 npx typegraph-mcp setup
 ```
 
-The interactive setup:
-1. Auto-detects your AI agents (Claude Code, Cursor, Codex CLI, Gemini CLI, GitHub Copilot)
-2. Installs the plugin into `./plugins/typegraph-mcp/` with dependencies
-3. Registers the MCP server, copies workflow skills, appends agent instructions
-4. Runs health checks and smoke tests to verify everything works
+The interactive setup auto-detects your AI agents, installs the plugin into `./plugins/typegraph-mcp/`, registers the MCP server, copies workflow skills, appends agent instructions, and runs verification. Use `--yes` to skip prompts.
 
-Use `--yes` to skip prompts and auto-select detected agents.
+### Step 2: Launch your agent
 
-**Claude Code** — load the plugin for the full experience (skills, slash commands, hooks):
+**Claude Code** — load the plugin for the full experience:
 
 ```bash
 claude --plugin-dir ./plugins/typegraph-mcp
 ```
 
-This gives you:
-- 14 MCP tools with automatic server management
-- 5 workflow skills that teach Claude *when* and *how* to chain tools
-- `/typegraph:check`, `/typegraph:test`, and `/typegraph:bench` slash commands
-- SessionStart hook that verifies dependencies are installed
+This gives you 14 MCP tools, 5 workflow skills that teach Claude *when* and *how* to chain tools, `/typegraph:check`, `/typegraph:test`, and `/typegraph:bench` slash commands, and a SessionStart hook for dependency verification.
 
-### Restart your agent session
+**Other agents** (Cursor, Codex CLI, Gemini CLI, GitHub Copilot) — restart your agent session. The MCP server and skills are already configured.
 
 First query takes ~2s (tsserver warmup). Subsequent queries: 1-60ms.
 
