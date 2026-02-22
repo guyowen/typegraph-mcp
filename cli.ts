@@ -141,6 +141,7 @@ Commands:
   remove   Uninstall typegraph-mcp from the current project
   check    Run health checks (12 checks)
   test     Run smoke tests (all 14 tools)
+  bench    Run benchmarks (token, latency, accuracy)
   start    Start the MCP server (stdin/stdout)
 
 Options:
@@ -786,6 +787,14 @@ async function test(): Promise<void> {
   process.exit(result.failed > 0 ? 1 : 0);
 }
 
+// ─── Benchmark Command ───────────────────────────────────────────────────────
+
+async function benchmark(): Promise<void> {
+  const config = resolveConfig(resolvePluginDir());
+  const { main: benchMain } = await import("./benchmark.js");
+  await benchMain(config);
+}
+
 // ─── Start Command ───────────────────────────────────────────────────────────
 
 async function start(): Promise<void> {
@@ -825,6 +834,13 @@ switch (command) {
     break;
   case "test":
     test().catch((err) => {
+      console.error("Fatal:", err);
+      process.exit(1);
+    });
+    break;
+  case "bench":
+  case "benchmark":
+    benchmark().catch((err) => {
       console.error("Fatal:", err);
       process.exit(1);
     });

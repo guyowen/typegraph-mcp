@@ -93,6 +93,7 @@ typegraph-mcp <command> [options]
   remove   Uninstall from the current project
   check    Run 12 health checks
   test     Smoke test all 14 tools
+  bench    Run benchmarks (token, latency, accuracy)
   start    Start the MCP server (stdin/stdout)
 
   --yes    Skip prompts     --help    Show help

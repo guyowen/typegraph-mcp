@@ -7,6 +7,7 @@ export default defineConfig({
     "server.ts",
     "check.ts",
     "smoke-test.ts",
+    "benchmark.ts",
     "config.ts",
     "module-graph.ts",
     "tsserver-client.ts",

@@ -53,7 +53,7 @@ Per-tool timing across 5 runs. Test file: `AddressServiceLive.ts` (auto-discover
 The benchmark is fully dynamic — it discovers scenarios from the module graph, so it works on any TypeScript project:
 
 ```bash
-TYPEGRAPH_PROJECT_ROOT=/path/to/project npx tsx benchmark.ts
+npx typegraph-mcp bench
 ```
 
 Scenarios that can't be found in the target codebase (e.g. no barrel files) are gracefully skipped.

@@ -27,7 +27,8 @@ import { resolveConfig } from "./config.js";
 
 // ─── Configuration ───────────────────────────────────────────────────────────
 
-const { projectRoot, tsconfigPath } = resolveConfig(import.meta.dirname);
+let projectRoot!: string;
+let tsconfigPath!: string;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -665,7 +666,8 @@ async function benchmarkAccuracy(
 
 // ─── Main ────────────────────────────────────────────────────────────────────
 
-async function main() {
+export async function main(config?: { projectRoot: string; tsconfigPath: string }) {
+  ({ projectRoot, tsconfigPath } = config ?? resolveConfig(import.meta.dirname));
   console.log("");
   console.log("typegraph-mcp Benchmark");
   console.log("=======================");
