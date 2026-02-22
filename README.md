@@ -59,7 +59,25 @@ Agent: ts_trace_chain({ file: "src/handlers.ts", symbol: "createUser" })
 
 ## Quick start
 
-### npm (recommended)
+### Claude Code (recommended)
+
+```bash
+# Install the plugin
+git clone https://github.com/guyowen/typegraph-mcp.git ~/typegraph-mcp
+cd ~/typegraph-mcp && npm install
+
+# Launch with the plugin loaded
+cd /path/to/your-ts-project
+claude --plugin-dir ~/typegraph-mcp
+```
+
+The plugin gives you the full experience:
+- 14 MCP tools with automatic server management
+- 5 workflow skills that teach Claude *when* and *how* to chain tools (impact analysis, refactor safety, dependency audit, code exploration, tool selection)
+- `/typegraph:check`, `/typegraph:test`, and `/typegraph:bench` slash commands
+- SessionStart hook that verifies dependencies are installed
+
+### Other agents (Cursor, Codex CLI, Gemini CLI, GitHub Copilot)
 
 ```bash
 cd /path/to/your-ts-project
@@ -67,22 +85,14 @@ npx typegraph-mcp setup
 ```
 
 The interactive setup:
-1. Auto-detects your AI agents (Claude Code, Cursor, Codex CLI, Gemini CLI, GitHub Copilot)
+1. Auto-detects your AI agents
 2. Installs the plugin, registers the MCP server, copies workflow skills
 3. Appends agent instructions to `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, etc.
 4. Runs health checks and smoke tests to verify everything works
 
 Use `--yes` to skip prompts and auto-select detected agents.
 
-### Claude Code plugin
-
-```bash
-git clone https://github.com/guyowen/typegraph-mcp.git ~/typegraph-mcp
-cd ~/typegraph-mcp && npm install
-claude --plugin-dir ~/typegraph-mcp
-```
-
-Auto-configures MCP server, 5 workflow skills, `/typegraph:check`, `/typegraph:test`, and `/typegraph:bench` commands, and a SessionStart hook for dependency verification.
+> **Note:** Claude Code users can also use `npx typegraph-mcp setup` to register the MCP tools, but `--plugin-dir` is required for skills, slash commands, and hooks.
 
 ### Restart your agent session
 
