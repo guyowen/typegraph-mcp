@@ -1,6 +1,6 @@
 {
   "name": "typegraph-mcp",
-  "version": "0.9.20",
+  "version": "0.9.21",
   "description": "Type-aware codebase navigation for AI coding agents — 14 MCP tools powered by tsserver + oxc",
   "license": "MIT",
   "type": "module",
