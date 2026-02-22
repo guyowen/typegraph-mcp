@@ -345,18 +345,12 @@ function ensureTsconfigExclude(projectRoot: string): void {
       fs.writeFileSync(tsconfigPath, updated);
     } else {
       // No exclude field — add one before the closing brace
-      const updated = raw.replace(/(\n)(\s*\})(\s*)$/, '$1  "exclude": ["plugins/**"]\n$2$3');
-      // If that didn't match (unusual formatting), try simpler approach
-      if (updated === raw) {
-        const lastBrace = raw.lastIndexOf("}");
-        if (lastBrace !== -1) {
-          const before = raw.slice(0, lastBrace).trimEnd();
-          const needsComma = !before.endsWith(",") && !before.endsWith("{");
-          const patched = `${before}${needsComma ? "," : ""}\n  "exclude": ["plugins/**"]\n}\n`;
-          fs.writeFileSync(tsconfigPath, patched);
-        }
-      } else {
-        fs.writeFileSync(tsconfigPath, updated);
+      const lastBrace = raw.lastIndexOf("}");
+      if (lastBrace !== -1) {
+        const before = raw.slice(0, lastBrace).trimEnd();
+        const needsComma = !before.endsWith(",") && !before.endsWith("{");
+        const patched = `${before}${needsComma ? "," : ""}\n  "exclude": ["plugins/**"]\n}\n`;
+        fs.writeFileSync(tsconfigPath, patched);
       }
     }
 
