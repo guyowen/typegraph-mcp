@@ -313,6 +313,61 @@ function deregisterCodexMcp(projectRoot: string): void {
   p.log.info(`${configPath}: removed typegraph MCP server`);
 }
 
+// ─── TSConfig Exclude ─────────────────────────────────────────────────────────
+
+function ensureTsconfigExclude(projectRoot: string): void {
+  const tsconfigPath = path.resolve(projectRoot, "tsconfig.json");
+  if (!fs.existsSync(tsconfigPath)) return;
+
+  try {
+    const raw = fs.readFileSync(tsconfigPath, "utf-8");
+    // Strip single-line comments (// ...) and trailing commas for JSON.parse
+    const stripped = raw
+      .replace(/\/\/.*$/gm, "")
+      .replace(/,(\s*[}\]])/g, "$1");
+    const tsconfig = JSON.parse(stripped);
+
+    const exclude: string[] = tsconfig.exclude || [];
+    if (exclude.some((e: string) => e === "plugins" || e === "plugins/**" || e === "plugins/*")) {
+      return; // Already excluded
+    }
+
+    // Insert "plugins/**" into the exclude array in the original file
+    if (raw.includes('"exclude"')) {
+      // Existing exclude array — append to it
+      const updated = raw.replace(
+        /("exclude"\s*:\s*\[)([\s\S]*?)(\])/,
+        (match, open, items, close) => {
+          const trimmed = items.trimEnd();
+          const needsComma = trimmed.length > 0 && !trimmed.endsWith(",");
+          return `${open}${items.trimEnd()}${needsComma ? "," : ""}\n    "plugins/**"${close}`;
+        }
+      );
+      fs.writeFileSync(tsconfigPath, updated);
+    } else {
+      // No exclude field — add one before the closing brace
+      const updated = raw.replace(/(\n)(\s*\})(\s*)$/, '$1  "exclude": ["plugins/**"]\n$2$3');
+      // If that didn't match (unusual formatting), try simpler approach
+      if (updated === raw) {
+        const lastBrace = raw.lastIndexOf("}");
+        if (lastBrace !== -1) {
+          const before = raw.slice(0, lastBrace).trimEnd();
+          const needsComma = !before.endsWith(",") && !before.endsWith("{");
+          const patched = `${before}${needsComma ? "," : ""}\n  "exclude": ["plugins/**"]\n}\n`;
+          fs.writeFileSync(tsconfigPath, patched);
+        }
+      } else {
+        fs.writeFileSync(tsconfigPath, updated);
+      }
+    }
+
+    p.log.success('Added "plugins/**" to tsconfig.json exclude (prevents build errors)');
+  } catch {
+    // Don't fail setup over tsconfig parsing issues
+    p.log.warn('Could not update tsconfig.json — manually add "plugins/**" to the exclude array to prevent build errors');
+  }
+}
+
 // ─── Agent Selection ─────────────────────────────────────────────────────────
 
 function detectAgents(projectRoot: string): AgentId[] {
@@ -512,7 +567,10 @@ async function setup(yes: boolean): Promise<void> {
   // 7. Register MCP server in agent-specific configs
   registerMcpServers(projectRoot, selectedAgents);
 
-  // 8. Verification
+  // 8. Ensure plugins/ is excluded from tsconfig
+  ensureTsconfigExclude(projectRoot);
+
+  // 9. Verification
   await runVerification(targetDir, selectedAgents);
 }
 
