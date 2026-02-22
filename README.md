@@ -8,18 +8,22 @@ Give your AI coding agent the same TypeScript understanding your IDE has.
 
 14 semantic navigation tools — go-to-definition, find-references, type info, dependency graphs, cycle detection, impact analysis — delivered via the [Model Context Protocol](https://modelcontextprotocol.io/) so any MCP-compatible agent can use them.
 
-## Before and after
+## grep vs typegraph-mcp
 
-```
-grep "createUser" → 47 results across test files, comments, variable names
-                    Agent reads 6 files, burns ~113,000 tokens, still guessing
+Measured on a real 440-file TypeScript monorepo:
 
-ts_trace_chain({ file: "src/handlers.ts", symbol: "createUser" })
-                  → handlers.ts → UserService.ts → UserRepository.ts
-                    3 hops, 1,006 tokens, done
-```
+| | grep | typegraph-mcp |
+|---|---|---|
+| **Context tokens** | ~113,000 | 1,006 |
+| **Files touched** | 47 | 3 |
+| **False positives** | dozens | 0 |
+| **Barrel file resolution** | reads 6 files, still guessing | 1 tool call, exact source |
+| **Cross-package impact** | 1,038 string matches | 31 direct + 158 transitive, by package |
+| **Circular dependency detection** | impossible | instant |
+| **Avg latency (semantic)** | n/a | 16.9ms |
+| **Avg latency (graph)** | n/a | 0.1ms |
 
-**99% context reduction** across all tested scenarios. [Full benchmarks](./BENCHMARKS.md).
+**99% context reduction. 100% accuracy. [Full benchmarks](./BENCHMARKS.md).**
 
 ## Quick start
 
