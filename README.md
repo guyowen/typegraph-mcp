@@ -1,5 +1,9 @@
 # typegraph-mcp
 
+<p align="center">
+  <img src="./assets/hero.jpg" alt="typegraph-mcp — Semantic TypeScript understanding for AI agents" width="800">
+</p>
+
 Give your AI coding agent the same TypeScript understanding your IDE has.
 
 14 semantic navigation tools — go-to-definition, find-references, type info, dependency graphs, cycle detection, impact analysis — delivered via the [Model Context Protocol](https://modelcontextprotocol.io/) so any MCP-compatible agent can use them.
