@@ -6,9 +6,22 @@
 
 Give your AI coding agent the same TypeScript understanding your IDE has.
 
-14 semantic navigation tools — go-to-definition, find-references, type info, dependency graphs, cycle detection, impact analysis — delivered via the [Model Context Protocol](https://modelcontextprotocol.io/) so any MCP-compatible agent can use them.
+14 semantic navigation tools delivered via the [Model Context Protocol](https://modelcontextprotocol.io/) so any MCP-compatible agent can use them.
 
-## grep vs typegraph-mcp
+- **Instant type resolution** — hover info, generics, inferred types without reading files
+- **Instant call tracing** — follow a symbol from handler to implementation in one call
+- **Instant impact analysis** — "what breaks if I change this?" across the entire codebase
+- **Instant dependency mapping** — what imports what, direct and transitive, by package
+- **Instant cycle detection** — circular imports found in <1ms
+- **Zero false positives** — semantic references, not string matches
+
+## The problem
+
+AI coding agents navigate TypeScript blind. They `grep` for a symbol name and get string matches instead of real references. They read entire files to find a type that's re-exported through three barrel files. They can't tell you what depends on what, or whether your refactor will break something two packages away.
+
+Every wrong turn burns context tokens and degrades the agent's output.
+
+## The difference
 
 Measured on a real 440-file TypeScript monorepo:
 
@@ -24,6 +37,25 @@ Measured on a real 440-file TypeScript monorepo:
 | **Avg latency (graph)** | n/a | 0.1ms |
 
 **99% context reduction. 100% accuracy. [Full benchmarks](./BENCHMARKS.md).**
+
+### Before: grep-based navigation
+
+```
+Agent: I need to find where createUser is implemented.
+  → grep "createUser" across project
+  → 47 results: test files, comments, variable names, string literals, actual definitions
+  → reads 6 files trying to follow the chain
+  → burns ~113,000 tokens, still not sure it found the right implementation
+```
+
+### After: typegraph-mcp
+
+```
+Agent: ts_trace_chain({ file: "src/handlers.ts", symbol: "createUser" })
+  → 3-hop chain: handlers.ts → UserService.ts → UserRepository.ts
+  → each hop shows the exact line with a code preview
+  → 1,006 tokens, done
+```
 
 ## Quick start
 
