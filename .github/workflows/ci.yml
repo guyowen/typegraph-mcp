@@ -64,3 +64,6 @@ jobs:
 
       - name: Publish to npm
         run: npm publish --provenance --access public
+
+      - name: Sync dev with main
+        run: git push origin main:dev
