@@ -62,6 +62,7 @@ const AGENTS: Record<AgentId, AgentDef> = {
       "scripts/ensure-deps.sh",
       "commands/check.md",
       "commands/test.md",
+      "commands/bench.md",
     ],
     agentFile: "CLAUDE.md",
     needsAgentsSkills: false,
