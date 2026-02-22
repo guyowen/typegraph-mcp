@@ -67,7 +67,7 @@ The plugin auto-configures everything:
 - `/typegraph:check` and `/typegraph:test` commands available in-session
 - SessionStart hook verifies dependencies are installed
 
-### Option C: CLI setup (from source)
+### Option C: From source
 
 ```bash
 # Clone and install
@@ -89,7 +89,7 @@ The interactive `setup` command (Options A and C):
 
 Use `--yes` to skip prompts and auto-select detected agents.
 
-### Option C: Manual setup
+### Option D: Manual setup
 
 If you prefer to configure things yourself:
 
