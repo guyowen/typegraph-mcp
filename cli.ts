@@ -808,6 +808,9 @@ const command = args.find((a) => !a.startsWith("-"));
 const yes = args.includes("--yes") || args.includes("-y");
 const help = args.includes("--help") || args.includes("-h");
 
+// Clear npx download noise (warnings, "Ok to proceed?" prompt)
+process.stdout.write("\x1Bc");
+
 if (help || !command) {
   console.log(HELP);
   process.exit(0);

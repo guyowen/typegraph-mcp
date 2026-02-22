@@ -143,6 +143,7 @@ npx typegraph-mcp check
 | "TypeScript not found" | Add `typescript` to devDependencies |
 | Tools return empty results | Check `TYPEGRAPH_TSCONFIG` points to the right tsconfig |
 | Build errors from plugins/ | Add `"plugins/**"` to tsconfig.json `exclude` array |
+| "npm warn Unknown project config" | Safe to ignore — caused by pnpm settings in your `.npmrc` that npm doesn't recognize |
 
 ## Manual MCP configuration
 
