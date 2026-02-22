@@ -150,8 +150,7 @@ npx typegraph-mcp check
 | Tools return empty results | Check `TYPEGRAPH_TSCONFIG` points to the right tsconfig |
 | Build errors from plugins/ | Add `"plugins/**"` to tsconfig.json `exclude` array |
 
-<details>
-<summary><strong>Manual MCP configuration</strong></summary>
+## Manual MCP configuration
 
 Add to `.claude/mcp.json` (or `~/.claude/mcp.json` for global):
 
@@ -172,10 +171,7 @@ Add to `.claude/mcp.json` (or `~/.claude/mcp.json` for global):
 
 `TYPEGRAPH_PROJECT_ROOT` resolves relative to the agent's working directory. The `args` path to `server.ts` must be absolute.
 
-</details>
-
-<details>
-<summary><strong>How it works</strong></summary>
+## How it works
 
 ```
 AI Agent ─── stdin/stdout ─── MCP Server ─┬── tsserver (child process)
@@ -192,8 +188,6 @@ Two subsystems start concurrently:
 2. **Module graph** — in-process import graph built with [oxc-parser](https://github.com/nicolo-ribaudo/oxc-parser) and [oxc-resolver](https://github.com/nicolo-ribaudo/oxc-resolver). Incrementally updated via `fs.watch`.
 
 **Monorepo support** — resolves through `composite` project references, maps `dist/` back to source, handles `extensionAlias` for `.js` → `.ts` mapping, and follows cross-package barrel re-exports.
-
-</details>
 
 ## Known limitations
 
