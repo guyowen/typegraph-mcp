@@ -4,7 +4,7 @@
   <img src="./assets/hero.jpg" alt="typegraph-mcp — Semantic TypeScript understanding for AI agents" width="800">
 </p>
 
-Give your AI coding agent TypeScript superintelligence.
+Supercharge your AI coding agent with TypeScript superintelligence.
 
 14 semantic navigation tools delivered via the [Model Context Protocol](https://modelcontextprotocol.io/) so any MCP-compatible agent can use them.
 
