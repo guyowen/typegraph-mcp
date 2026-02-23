@@ -57,7 +57,6 @@ const AGENTS: Record<AgentId, AgentDef> = {
     name: "Claude Code",
     pluginFiles: [
       ".claude-plugin/plugin.json",
-      ".mcp.json",
       "hooks/hooks.json",
       "scripts/ensure-deps.sh",
       "commands/check.md",
@@ -543,6 +542,26 @@ async function setup(yes: boolean): Promise<void> {
     } else {
       p.log.warn(`Source file not found: ${file}`);
     }
+  }
+
+  // Generate .mcp.json for Claude Code plugin discovery
+  if (selectedAgents.includes("claude-code")) {
+    const mcpConfig = {
+      mcpServers: {
+        typegraph: {
+          command: "npx",
+          args: ["tsx", "${CLAUDE_PLUGIN_ROOT}/server.ts"],
+          env: {
+            TYPEGRAPH_PROJECT_ROOT: ".",
+            TYPEGRAPH_TSCONFIG: "./tsconfig.json",
+          },
+        },
+      },
+    };
+    const mcpPath = path.join(targetDir, ".mcp.json");
+    fs.mkdirSync(path.dirname(mcpPath), { recursive: true });
+    fs.writeFileSync(mcpPath, JSON.stringify(mcpConfig, null, 2) + "\n");
+    copied++;
   }
 
   s.message("Installing dependencies...");
