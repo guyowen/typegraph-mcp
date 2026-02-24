@@ -1,3 +1,8 @@
+---
+name: code-exploration
+description: Efficiently explore unfamiliar TypeScript code using navigation tools instead of reading entire files. Trigger when asking how something works, exploring a new module, understanding architecture, or tracing request flows.
+---
+
 # Code Exploration Workflow
 
 Efficiently explore unfamiliar TypeScript code using navigation tools instead of reading entire files.

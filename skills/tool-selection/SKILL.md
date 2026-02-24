@@ -1,3 +1,8 @@
+---
+name: tool-selection
+description: Select the right typegraph-mcp tool for TypeScript navigation. Trigger when finding definitions, references, types, exploring code structure, preparing refactors, or any task where you would otherwise use grep/glob for TypeScript symbols.
+---
+
 # TypeGraph Tool Selection Guide
 
 Select the right typegraph-mcp tool for the task at hand. These tools provide type-aware TypeScript navigation — use them instead of grep/glob for any TypeScript codebase navigation.

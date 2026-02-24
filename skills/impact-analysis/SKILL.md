@@ -1,3 +1,8 @@
+---
+name: impact-analysis
+description: Analyze the impact of changing a TypeScript symbol by combining blast radius, dependents, and module boundary analysis. Trigger when asking what will break, assessing change risk, or before modifying widely-used symbols.
+---
+
 # Impact Analysis Workflow
 
 Analyze the impact of changing a TypeScript symbol by combining blast radius, dependents, and module boundary analysis.

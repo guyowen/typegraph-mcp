@@ -1,3 +1,8 @@
+---
+name: refactor-safety
+description: Verify a refactor is safe before making changes. Trigger when renaming, moving, or restructuring TypeScript modules, extracting code into new modules, or changing interfaces and service definitions.
+---
+
 # Refactor Safety Check Workflow
 
 Verify a refactor is safe before making changes by checking call chains, circular dependencies, and module boundaries.

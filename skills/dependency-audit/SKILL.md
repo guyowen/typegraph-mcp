@@ -1,3 +1,8 @@
+---
+name: dependency-audit
+description: Audit module dependencies to find circular imports, analyze coupling, and understand dependency structure. Trigger when asking about circular deps, module structure, package coupling, or evaluating module boundaries.
+---
+
 # Dependency Audit Workflow
 
 Audit module dependencies to find circular imports, analyze coupling, and understand the dependency structure.
