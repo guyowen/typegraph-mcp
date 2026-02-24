@@ -62,6 +62,7 @@ const AGENTS: Record<AgentId, AgentDef> = {
       "commands/check.md",
       "commands/test.md",
       "commands/bench.md",
+      "commands/deep-survey.md",
     ],
     agentFile: "CLAUDE.md",
     needsAgentsSkills: false,
@@ -120,6 +121,7 @@ const SKILL_FILES = [
   "skills/refactor-safety/SKILL.md",
   "skills/dependency-audit/SKILL.md",
   "skills/code-exploration/SKILL.md",
+  "skills/deep-survey/SKILL.md",
 ];
 
 
@@ -129,6 +131,7 @@ const SKILL_NAMES = [
   "refactor-safety",
   "dependency-audit",
   "code-exploration",
+  "deep-survey",
 ];
 
 const HELP = `
@@ -792,7 +795,7 @@ async function runVerification(pluginDir: string, selectedAgents: AgentId[]): Pr
 
   if (checkResult.failed === 0 && testResult.failed === 0) {
     if (selectedAgents.includes("claude-code")) {
-      p.outro("Setup complete! Run: claude --plugin-dir ./plugins/typegraph-mcp\n  Slash commands: /typegraph:check, /typegraph:test, /typegraph:bench");
+      p.outro("Setup complete! Run: claude --plugin-dir ./plugins/typegraph-mcp\n  Slash commands: /typegraph:check, /typegraph:test, /typegraph:bench, /typegraph:deep-survey");
     } else {
       p.outro("Setup complete! typegraph-mcp tools are now available to your agents.\n  CLI: npx typegraph-mcp check | test | bench");
     }
