@@ -12,7 +12,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { createRequire } from "node:module";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { resolveConfig, type TypegraphConfig } from "./config.js";
 
 // ─── Result Type ─────────────────────────────────────────────────────────────
@@ -186,10 +186,17 @@ export async function main(configOverride?: TypegraphConfig): Promise<CheckResul
   // Check for plugin .mcp.json in the tool directory (embedded plugin install)
   const pluginMcpPath = path.join(toolDir, ".mcp.json");
   const hasPluginMcp = fs.existsSync(pluginMcpPath) && fs.existsSync(path.join(toolDir, ".claude-plugin/plugin.json"));
+  const codexGet = spawnSync("codex", ["mcp", "get", "typegraph"], {
+    stdio: "pipe",
+    encoding: "utf-8",
+  });
+  const hasCodexRegistration = codexGet.status === 0;
   if (process.env.CLAUDE_PLUGIN_ROOT) {
     pass("MCP registered via plugin (CLAUDE_PLUGIN_ROOT set)");
   } else if (hasPluginMcp) {
     pass("MCP registered via plugin (.mcp.json + .claude-plugin/ present)");
+  } else if (hasCodexRegistration) {
+    pass("MCP registered in Codex CLI");
   } else {
     const mcpJsonPath = path.resolve(projectRoot, ".claude/mcp.json");
     if (fs.existsSync(mcpJsonPath)) {
@@ -450,4 +457,3 @@ export async function main(configOverride?: TypegraphConfig): Promise<CheckResul
 
   return { passed, failed, warned };
 }
-
