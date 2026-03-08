@@ -68,4 +68,4 @@ jobs:
           git push --follow-tags
 
       - name: Sync dev with main
-        run: git push origin main:dev
+        run: git push --force origin main:dev
