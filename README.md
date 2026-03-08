@@ -80,6 +80,8 @@ This gives you 14 MCP tools, 5 workflow skills that teach Claude *when* and *how
 
 **Other agents** (Cursor, Codex CLI, Gemini CLI, GitHub Copilot) — restart your agent session. The MCP server and skills are already configured.
 
+For **Codex CLI**, setup now registers the server with `codex mcp add` using absolute paths so the tools work even when Codex launches from outside your project root.
+
 First query takes ~2s (tsserver warmup). Subsequent queries: 1-60ms.
 
 ## Requirements
@@ -146,6 +148,26 @@ npx typegraph-mcp check
 | "npm warn Unknown project config" | Safe to ignore — caused by pnpm settings in your `.npmrc` that npm doesn't recognize |
 
 ## Manual MCP configuration
+
+### Codex CLI
+
+Register the server with absolute paths:
+
+```bash
+codex mcp add typegraph \
+  --env TYPEGRAPH_PROJECT_ROOT=/absolute/path/to/your-project \
+  --env TYPEGRAPH_TSCONFIG=/absolute/path/to/your-project/tsconfig.json \
+  -- npx tsx /absolute/path/to/your-project/plugins/typegraph-mcp/server.ts
+```
+
+Verify with:
+
+```bash
+codex mcp get typegraph
+codex mcp list
+```
+
+### JSON-based MCP clients
 
 Add to `.claude/mcp.json` (or `~/.claude/mcp.json` for global):
 

@@ -15,7 +15,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { execSync } from "node:child_process";
+import { execSync, spawnSync } from "node:child_process";
 import * as p from "@clack/prompts";
 import { resolveConfig } from "./config.js";
 
@@ -177,6 +177,21 @@ const MCP_SERVER_ENTRY = {
   },
 };
 
+function getAbsoluteMcpServerEntry(projectRoot: string): {
+  command: string;
+  args: string[];
+  env: Record<string, string>;
+} {
+  return {
+    command: "npx",
+    args: ["tsx", path.resolve(projectRoot, PLUGIN_DIR_NAME, "server.ts")],
+    env: {
+      TYPEGRAPH_PROJECT_ROOT: projectRoot,
+      TYPEGRAPH_TSCONFIG: path.resolve(projectRoot, "tsconfig.json"),
+    },
+  };
+}
+
 /** Register the typegraph MCP server in agent-specific config files */
 function registerMcpServers(projectRoot: string, selectedAgents: AgentId[]): void {
   if (selectedAgents.includes("cursor")) {
@@ -259,6 +274,57 @@ function deregisterJsonMcp(projectRoot: string, configPath: string, rootKey: str
 
 /** Register MCP server in Codex CLI's TOML config */
 function registerCodexMcp(projectRoot: string): void {
+  const absoluteEntry = getAbsoluteMcpServerEntry(projectRoot);
+
+  const codexGet = spawnSync("codex", ["mcp", "get", "typegraph"], {
+    stdio: "pipe",
+    encoding: "utf-8",
+  });
+
+  if (codexGet.status === 0) {
+    const output = `${codexGet.stdout ?? ""}${codexGet.stderr ?? ""}`;
+    const hasServerPath = output.includes(absoluteEntry.args[1]!);
+    const hasProjectRoot = output.includes("TYPEGRAPH_PROJECT_ROOT=*****") || output.includes(projectRoot);
+    const hasTsconfig = output.includes("TYPEGRAPH_TSCONFIG=*****") || output.includes(path.resolve(projectRoot, "tsconfig.json"));
+    if (hasServerPath && hasProjectRoot && hasTsconfig) {
+      p.log.info("Codex CLI: typegraph MCP server already registered");
+      return;
+    }
+    spawnSync("codex", ["mcp", "remove", "typegraph"], {
+      stdio: "pipe",
+      encoding: "utf-8",
+    });
+  }
+
+  const codexAdd = spawnSync(
+    "codex",
+    [
+      "mcp",
+      "add",
+      "typegraph",
+      "--env",
+      `TYPEGRAPH_PROJECT_ROOT=${absoluteEntry.env.TYPEGRAPH_PROJECT_ROOT}`,
+      "--env",
+      `TYPEGRAPH_TSCONFIG=${absoluteEntry.env.TYPEGRAPH_TSCONFIG}`,
+      "--",
+      absoluteEntry.command,
+      ...absoluteEntry.args,
+    ],
+    {
+      stdio: "pipe",
+      encoding: "utf-8",
+    }
+  );
+
+  if (codexAdd.status === 0) {
+    p.log.success("Codex CLI: registered typegraph MCP server");
+    return;
+  }
+
+  p.log.warn(
+    `Codex CLI registration failed — falling back to ${".codex/config.toml"}`
+  );
+
   const configPath = ".codex/config.toml";
   const fullPath = path.resolve(projectRoot, configPath);
   let content = "";
@@ -275,9 +341,9 @@ function registerCodexMcp(projectRoot: string): void {
   const block = [
     "",
     "[mcp_servers.typegraph]",
-    'command = "npx"',
-    'args = ["tsx", "./plugins/typegraph-mcp/server.ts"]',
-    'env = { TYPEGRAPH_PROJECT_ROOT = ".", TYPEGRAPH_TSCONFIG = "./tsconfig.json" }',
+    `command = "${absoluteEntry.command}"`,
+    `args = ["${absoluteEntry.args[0]}", "${absoluteEntry.args[1]}"]`,
+    `env = { TYPEGRAPH_PROJECT_ROOT = "${absoluteEntry.env.TYPEGRAPH_PROJECT_ROOT}", TYPEGRAPH_TSCONFIG = "${absoluteEntry.env.TYPEGRAPH_TSCONFIG}" }`,
     "",
   ].join("\n");
 
@@ -292,6 +358,14 @@ function registerCodexMcp(projectRoot: string): void {
 
 /** Deregister MCP server from Codex CLI's TOML config */
 function deregisterCodexMcp(projectRoot: string): void {
+  const codexRemove = spawnSync("codex", ["mcp", "remove", "typegraph"], {
+    stdio: "pipe",
+    encoding: "utf-8",
+  });
+  if (codexRemove.status === 0) {
+    p.log.info("Codex CLI: removed typegraph MCP server");
+  }
+
   const configPath = ".codex/config.toml";
   const fullPath = path.resolve(projectRoot, configPath);
   if (!fs.existsSync(fullPath)) return;
