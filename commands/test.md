@@ -12,7 +12,7 @@ Run smoke tests that exercise all 14 tools against the current project.
 1. Run the smoke test command:
 
    ```bash
-   npx tsx ${CLAUDE_PLUGIN_ROOT}/cli.ts test
+   "__TYPEGRAPH_NODE__" "${CLAUDE_PLUGIN_ROOT}/node_modules/tsx/dist/cli.mjs" "${CLAUDE_PLUGIN_ROOT}/cli.ts" test
    ```
 
 2. Parse the output and report results:

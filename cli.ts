@@ -74,6 +74,7 @@ Practical rule:
 `.trimStart();
 
 const SNIPPET_MARKER = "## TypeScript Navigation (typegraph-mcp)";
+const CLAUDE_NODE_PLACEHOLDER = "__TYPEGRAPH_NODE__";
 
 const PLUGIN_DIR_NAME = "plugins/typegraph-mcp";
 
@@ -150,6 +151,14 @@ const SKILL_FILES = [
   "skills/code-exploration/SKILL.md",
   "skills/deep-survey/SKILL.md",
 ];
+
+const CLAUDE_TEMPLATE_FILES = new Set([
+  "commands/check.md",
+  "commands/test.md",
+  "commands/bench.md",
+  "commands/deep-survey.md",
+  "skills/deep-survey/SKILL.md",
+]);
 
 
 const SKILL_NAMES = [
@@ -810,7 +819,14 @@ async function setup(yes: boolean): Promise<void> {
     const src = path.join(sourceDir, file);
     const dest = path.join(targetDir, file);
     if (fs.existsSync(src)) {
-      copyFile(src, dest);
+      if (selectedAgents.includes("claude-code") && CLAUDE_TEMPLATE_FILES.has(file)) {
+        const content = fs.readFileSync(src, "utf-8")
+          .replaceAll(CLAUDE_NODE_PLACEHOLDER, process.execPath);
+        fs.mkdirSync(path.dirname(dest), { recursive: true });
+        fs.writeFileSync(dest, content);
+      } else {
+        copyFile(src, dest);
+      }
       copied++;
     } else {
       p.log.warn(`Source file not found: ${file}`);
@@ -822,8 +838,8 @@ async function setup(yes: boolean): Promise<void> {
     const mcpConfig = {
       mcpServers: {
         typegraph: {
-          command: "npx",
-          args: ["tsx", "${CLAUDE_PLUGIN_ROOT}/server.ts"],
+          command: process.execPath,
+          args: ["${CLAUDE_PLUGIN_ROOT}/node_modules/tsx/dist/cli.mjs", "${CLAUDE_PLUGIN_ROOT}/server.ts"],
           env: {
             TYPEGRAPH_PROJECT_ROOT: ".",
             TYPEGRAPH_TSCONFIG: "./tsconfig.json",

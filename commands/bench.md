@@ -12,7 +12,7 @@ Run benchmarks to measure typegraph-mcp performance on this project.
 1. Run the benchmark command:
 
    ```bash
-   npx tsx ${CLAUDE_PLUGIN_ROOT}/cli.ts bench
+   "__TYPEGRAPH_NODE__" "${CLAUDE_PLUGIN_ROOT}/node_modules/tsx/dist/cli.mjs" "${CLAUDE_PLUGIN_ROOT}/cli.ts" bench
    ```
 
 2. Parse the output and report results:

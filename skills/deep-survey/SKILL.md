@@ -31,7 +31,7 @@ Follow the phases below in order. Each phase produces findings.
 
 Run the health check first:
 ```bash
-npx tsx ${CLAUDE_PLUGIN_ROOT}/cli.ts check
+"__TYPEGRAPH_NODE__" "${CLAUDE_PLUGIN_ROOT}/node_modules/tsx/dist/cli.mjs" "${CLAUDE_PLUGIN_ROOT}/cli.ts" check
 ```
 
 Record three numbers from the output:

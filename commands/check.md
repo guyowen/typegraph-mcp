@@ -12,7 +12,7 @@ Run health checks to verify typegraph-mcp is correctly set up for this project.
 1. Run the health check command:
 
    ```bash
-   npx tsx ${CLAUDE_PLUGIN_ROOT}/cli.ts check
+   "__TYPEGRAPH_NODE__" "${CLAUDE_PLUGIN_ROOT}/node_modules/tsx/dist/cli.mjs" "${CLAUDE_PLUGIN_ROOT}/cli.ts" check
    ```
 
 2. Parse the output and report results:
