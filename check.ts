@@ -162,6 +162,45 @@ function hasTrustedCodexProject(projectRoot: string): boolean | null {
   return matchesTrustedProject();
 }
 
+function readProjectPackageJson(projectRoot: string): Record<string, unknown> | null {
+  const packageJsonPath = path.resolve(projectRoot, "package.json");
+  if (!fs.existsSync(packageJsonPath)) return null;
+
+  try {
+    return JSON.parse(fs.readFileSync(packageJsonPath, "utf-8")) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+function getProjectInstallCommand(projectRoot: string, packageJson: Record<string, unknown> | null): string {
+  const packageManager = typeof packageJson?.["packageManager"] === "string"
+    ? packageJson["packageManager"]
+    : "";
+
+  if (packageManager.startsWith("pnpm@") || fs.existsSync(path.join(projectRoot, "pnpm-lock.yaml"))) {
+    return "pnpm install";
+  }
+  if (packageManager.startsWith("yarn@") || fs.existsSync(path.join(projectRoot, "yarn.lock"))) {
+    return "yarn install";
+  }
+  return "npm install";
+}
+
+function hasDeclaredDependency(packageJson: Record<string, unknown> | null, packageName: string): boolean {
+  const depKeys = [
+    "dependencies",
+    "devDependencies",
+    "peerDependencies",
+    "optionalDependencies",
+  ] as const;
+
+  return depKeys.some((key) => {
+    const deps = packageJson?.[key];
+    return typeof deps === "object" && deps !== null && packageName in deps;
+  });
+}
+
 // ─── Main ────────────────────────────────────────────────────────────────────
 
 export async function main(configOverride?: TypegraphConfig): Promise<CheckResult> {
@@ -171,6 +210,8 @@ export async function main(configOverride?: TypegraphConfig): Promise<CheckResul
   let passed = 0;
   let failed = 0;
   let warned = 0;
+  const projectPackageJson = readProjectPackageJson(projectRoot);
+  const installCommand = getProjectInstallCommand(projectRoot, projectPackageJson);
 
   function pass(msg: string): void {
     console.log(`  \u2713 ${msg}`);
@@ -228,9 +269,14 @@ export async function main(configOverride?: TypegraphConfig): Promise<CheckResul
     tsVersion = tsPkg.version;
     pass(`TypeScript found (v${tsVersion})`);
   } catch {
+    const hasDeclaredTs = hasDeclaredDependency(projectPackageJson, "typescript");
     fail(
-      "TypeScript not found in project",
-      "Add `typescript` to devDependencies and run `npm install`"
+      hasDeclaredTs
+        ? "TypeScript is declared but not installed in project"
+        : "TypeScript not found in project",
+      hasDeclaredTs
+        ? `Run \`${installCommand}\` to install project dependencies`
+        : `Add \`typescript\` to devDependencies and run \`${installCommand}\``
     );
   }
 

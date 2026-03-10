@@ -142,7 +142,7 @@ npx typegraph-mcp check
 | Symptom | Fix |
 |---|---|
 | Server won't start | `cd plugins/typegraph-mcp && npm install --include=optional` |
-| "TypeScript not found" | Add `typescript` to devDependencies |
+| "TypeScript not found" | Run `pnpm install` or `npm install`; if TypeScript is not declared, add it to devDependencies first |
 | Tools return empty results | Check `TYPEGRAPH_TSCONFIG` points to the right tsconfig |
 | Build errors from plugins/ | Add `"plugins/**"` to tsconfig.json `exclude` array |
 | `@esbuild/*` or `@rollup/*` package missing | Reinstall with Node 22: `npm install --include=optional` |
