@@ -207,6 +207,21 @@ function getAbsoluteMcpServerEntry(projectRoot: string): {
   };
 }
 
+function getCodexMcpServerEntry(projectRoot: string): {
+  command: string;
+  args: string[];
+  env: Record<string, string>;
+} {
+  return {
+    command: path.resolve(projectRoot, PLUGIN_DIR_NAME, "node_modules/.bin/tsx"),
+    args: [path.resolve(projectRoot, PLUGIN_DIR_NAME, "server.ts")],
+    env: {
+      TYPEGRAPH_PROJECT_ROOT: projectRoot,
+      TYPEGRAPH_TSCONFIG: path.resolve(projectRoot, "tsconfig.json"),
+    },
+  };
+}
+
 function getCodexConfigPath(projectRoot: string): string {
   return path.resolve(projectRoot, ".codex/config.toml");
 }
@@ -236,12 +251,13 @@ function upsertCodexMcpSection(content: string, block: string): { content: strin
 }
 
 function makeCodexMcpBlock(projectRoot: string): string {
-  const absoluteEntry = getAbsoluteMcpServerEntry(projectRoot);
+  const absoluteEntry = getCodexMcpServerEntry(projectRoot);
+  const args = absoluteEntry.args.map((arg) => `"${arg}"`).join(", ");
   return [
     "",
     "[mcp_servers.typegraph]",
     `command = "${absoluteEntry.command}"`,
-    `args = ["${absoluteEntry.args[0]}", "${absoluteEntry.args[1]}"]`,
+    `args = [${args}]`,
     `env = { TYPEGRAPH_PROJECT_ROOT = "${absoluteEntry.env.TYPEGRAPH_PROJECT_ROOT}", TYPEGRAPH_TSCONFIG = "${absoluteEntry.env.TYPEGRAPH_TSCONFIG}" }`,
     "",
   ].join("\n");

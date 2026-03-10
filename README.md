@@ -156,10 +156,12 @@ Add this to your project's `.codex/config.toml`:
 
 ```toml
 [mcp_servers.typegraph]
-command = "npx"
-args = ["tsx", "/absolute/path/to/your-project/plugins/typegraph-mcp/server.ts"]
+command = "/absolute/path/to/your-project/plugins/typegraph-mcp/node_modules/.bin/tsx"
+args = ["/absolute/path/to/your-project/plugins/typegraph-mcp/server.ts"]
 env = { TYPEGRAPH_PROJECT_ROOT = "/absolute/path/to/your-project", TYPEGRAPH_TSCONFIG = "/absolute/path/to/your-project/tsconfig.json" }
 ```
+
+Using the plugin-local `tsx` binary avoids relying on `npx tsx` being resolvable when Codex launches the MCP server.
 
 Codex only loads project `.codex/config.toml` files for trusted projects. If needed, add this to `~/.codex/config.toml`:
 

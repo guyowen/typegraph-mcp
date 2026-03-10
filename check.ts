@@ -112,11 +112,19 @@ function hasCodexTypegraphRegistration(content: string): boolean {
   return /\[mcp_servers\.typegraph\]/.test(content);
 }
 
+function hasCodexTsxLauncher(content: string): boolean {
+  return (
+    /command\s*=\s*"[^"]*tsx(?:\.cmd)?"/.test(content) ||
+    /args\s*=\s*\[[\s\S]*"tsx"/.test(content)
+  );
+}
+
 function hasCompleteCodexTypegraphRegistration(content: string): boolean {
   return (
     hasCodexTypegraphRegistration(content) &&
     /command\s*=\s*"[^"]+"/.test(content) &&
-    /args\s*=\s*\[[\s\S]*"tsx"/.test(content) &&
+    /args\s*=\s*\[[\s\S]*\]/.test(content) &&
+    hasCodexTsxLauncher(content) &&
     /TYPEGRAPH_PROJECT_ROOT\s*=/.test(content) &&
     /TYPEGRAPH_TSCONFIG\s*=/.test(content)
   );
@@ -308,7 +316,8 @@ export async function main(configOverride?: TypegraphConfig): Promise<CheckResul
     const codexConfigPath = path.resolve(projectRoot, ".codex/config.toml");
     const hasSection = hasCodexTypegraphRegistration(projectCodexConfig);
     const hasCommand = /command\s*=\s*"[^"]+"/.test(projectCodexConfig);
-    const hasArgs = /args\s*=\s*\[[\s\S]*"tsx"/.test(projectCodexConfig);
+    const hasArgs = /args\s*=\s*\[[\s\S]*\]/.test(projectCodexConfig);
+    const hasTsxLauncher = hasCodexTsxLauncher(projectCodexConfig);
     const hasEnvRoot = /TYPEGRAPH_PROJECT_ROOT\s*=/.test(projectCodexConfig);
     const hasEnvTsconfig = /TYPEGRAPH_TSCONFIG\s*=/.test(projectCodexConfig);
     if (hasProjectCodexRegistration) {
@@ -324,7 +333,8 @@ export async function main(configOverride?: TypegraphConfig): Promise<CheckResul
       const issues: string[] = [];
       if (!hasSection) issues.push("[mcp_servers.typegraph] section is missing");
       if (!hasCommand) issues.push("command is missing");
-      if (!hasArgs) issues.push("args should include 'tsx'");
+      if (!hasArgs) issues.push("args are missing");
+      if (!hasTsxLauncher) issues.push("command should point to tsx or args should include 'tsx'");
       if (!hasEnvRoot) issues.push("TYPEGRAPH_PROJECT_ROOT is missing");
       if (!hasEnvTsconfig) issues.push("TYPEGRAPH_TSCONFIG is missing");
       fail(
