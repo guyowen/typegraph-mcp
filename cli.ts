@@ -41,6 +41,12 @@ interface LegacyGlobalCodexCleanup {
   nextContent: string;
 }
 
+interface RemovePluginOptions {
+  removeGlobalCodex: boolean;
+  legacyGlobalCodexCleanup: LegacyGlobalCodexCleanup | null;
+  warnAboutGlobalCodex: boolean;
+}
+
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const AGENT_SNIPPET = `
@@ -413,6 +419,41 @@ function removeLegacyGlobalCodexMcp(cleanup: LegacyGlobalCodexCleanup): void {
   p.log.info("~/.codex/config.toml: removed stale global typegraph MCP server entry for this project");
 }
 
+async function resolveRemovePluginOptions(
+  projectRoot: string,
+  yes: boolean,
+  cleanGlobalCodex: boolean
+): Promise<RemovePluginOptions> {
+  const legacyGlobalCodexCleanup = findLegacyGlobalCodexCleanup(projectRoot);
+  let removeGlobalCodex = cleanGlobalCodex;
+
+  if (legacyGlobalCodexCleanup && !cleanGlobalCodex && !yes) {
+    const shouldRemoveGlobal = await p.confirm({
+      message: "Also remove the stale global Codex MCP entry for this project from ~/.codex/config.toml?",
+      initialValue: false,
+    });
+    if (p.isCancel(shouldRemoveGlobal)) {
+      p.cancel("Removal cancelled.");
+      process.exit(0);
+    }
+    removeGlobalCodex = shouldRemoveGlobal;
+  }
+
+  return {
+    removeGlobalCodex,
+    legacyGlobalCodexCleanup,
+    warnAboutGlobalCodex: legacyGlobalCodexCleanup !== null && !removeGlobalCodex,
+  };
+}
+
+function warnAboutStaleGlobalCodex(): void {
+  p.log.warn(
+    "Left a stale global Codex MCP entry for this project in ~/.codex/config.toml. " +
+    "Codex may show MCP startup warnings or errors until you remove it. " +
+    "Re-run `typegraph-mcp remove --clean-global-codex` or remove the `typegraph` block manually."
+  );
+}
+
 /** Register the typegraph MCP server in agent-specific config files */
 function registerMcpServers(projectRoot: string, selectedAgents: AgentId[]): void {
   if (selectedAgents.includes("cursor")) {
@@ -724,7 +765,11 @@ async function setup(yes: boolean): Promise<void> {
     }
 
     if (action === "remove") {
-      await removePlugin(projectRoot, targetDir);
+      const removeOptions = await resolveRemovePluginOptions(projectRoot, false, false);
+      await removePlugin(projectRoot, targetDir, removeOptions);
+      if (removeOptions.warnAboutGlobalCodex) {
+        warnAboutStaleGlobalCodex();
+      }
       return;
     }
 
@@ -869,7 +914,7 @@ async function setup(yes: boolean): Promise<void> {
 async function removePlugin(
   projectRoot: string,
   pluginDir: string,
-  options: { removeGlobalCodex: boolean; legacyGlobalCodexCleanup: LegacyGlobalCodexCleanup | null }
+  options: RemovePluginOptions
 ): Promise<void> {
   const s = p.spinner();
   s.start("Removing typegraph-mcp...");
@@ -1056,32 +1101,11 @@ async function remove(yes: boolean): Promise<void> {
     }
   }
 
-  const legacyGlobalCodexCleanup = findLegacyGlobalCodexCleanup(projectRoot);
-  let removeGlobalCodex = cleanGlobalCodex;
+  const removeOptions = await resolveRemovePluginOptions(projectRoot, yes, cleanGlobalCodex);
+  await removePlugin(projectRoot, pluginDir, removeOptions);
 
-  if (legacyGlobalCodexCleanup && !cleanGlobalCodex && !yes) {
-    const shouldRemoveGlobal = await p.confirm({
-      message: "Also remove the stale global Codex MCP entry for this project from ~/.codex/config.toml?",
-      initialValue: false,
-    });
-    if (p.isCancel(shouldRemoveGlobal)) {
-      p.cancel("Removal cancelled.");
-      process.exit(0);
-    }
-    removeGlobalCodex = shouldRemoveGlobal;
-  }
-
-  await removePlugin(projectRoot, pluginDir, {
-    removeGlobalCodex,
-    legacyGlobalCodexCleanup,
-  });
-
-  if (legacyGlobalCodexCleanup && !removeGlobalCodex) {
-    p.log.warn(
-      "Left a stale global Codex MCP entry for this project in ~/.codex/config.toml. " +
-      "Codex may show MCP startup warnings or errors until you remove it. " +
-      "Re-run `typegraph-mcp remove --clean-global-codex` or remove the `typegraph` block manually."
-    );
+  if (removeOptions.warnAboutGlobalCodex) {
+    warnAboutStaleGlobalCodex();
   }
 }
 
