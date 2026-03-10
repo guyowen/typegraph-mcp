@@ -10,6 +10,7 @@
  *
  * Options:
  *   --yes   Skip confirmation prompts (accept all defaults)
+ *   --clean-global-codex   Also remove a stale global Codex MCP entry for this project
  *   --help  Show help
  */
 
@@ -33,6 +34,11 @@ interface AgentDef {
   needsAgentsSkills: boolean;
   /** Detect if this agent is likely in use based on project files */
   detect: (projectRoot: string) => boolean;
+}
+
+interface LegacyGlobalCodexCleanup {
+  globalConfigPath: string;
+  nextContent: string;
 }
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -163,8 +169,9 @@ Commands:
   start    Start the MCP server (stdin/stdout)
 
 Options:
-  --yes   Skip confirmation prompts (accept all defaults)
-  --help  Show this help
+  --yes                 Skip confirmation prompts (accept all defaults)
+  --clean-global-codex  Also remove a stale global Codex MCP entry for this project
+  --help                Show this help
 `.trim();
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -226,8 +233,59 @@ function getCodexConfigPath(projectRoot: string): string {
   return path.resolve(projectRoot, ".codex/config.toml");
 }
 
-function hasCodexMcpSection(content: string): boolean {
-  return content.includes("[mcp_servers.typegraph]");
+function isTomlSectionGroup(sectionName: string | null, prefix: string): boolean {
+  return sectionName === prefix || sectionName?.startsWith(`${prefix}.`) === true;
+}
+
+function splitTomlBlocks(content: string): Array<{ sectionName: string | null; raw: string }> {
+  const lines = content.split(/\r?\n/);
+  const blocks: Array<{ sectionName: string | null; raw: string }> = [];
+  let sectionName: string | null = null;
+  let currentLines: string[] = [];
+
+  for (const line of lines) {
+    const match = line.match(/^\[([^\]]+)\]\s*$/);
+    if (match) {
+      if (currentLines.length > 0 || sectionName !== null) {
+        blocks.push({ sectionName, raw: currentLines.join("\n") });
+      }
+      sectionName = match[1]!;
+      currentLines = [line];
+      continue;
+    }
+
+    currentLines.push(line);
+  }
+
+  if (currentLines.length > 0 || sectionName !== null) {
+    blocks.push({ sectionName, raw: currentLines.join("\n") });
+  }
+
+  return blocks;
+}
+
+function removeTomlSectionGroup(
+  content: string,
+  prefix: string
+): { content: string; removed: boolean; removedContent: string } {
+  const blocks = splitTomlBlocks(content);
+  const removedBlocks = blocks.filter((block) => isTomlSectionGroup(block.sectionName, prefix));
+  if (removedBlocks.length === 0) {
+    return { content, removed: false, removedContent: "" };
+  }
+
+  const keptBlocks = blocks.filter((block) => !isTomlSectionGroup(block.sectionName, prefix));
+  const nextContent = keptBlocks
+    .map((block) => block.raw)
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trimEnd();
+
+  return {
+    content: nextContent ? `${nextContent}\n` : "",
+    removed: true,
+    removedContent: removedBlocks.map((block) => block.raw).join("\n").trim(),
+  };
 }
 
 function upsertCodexMcpSection(content: string, block: string): { content: string; changed: boolean } {
@@ -302,6 +360,57 @@ function isCodexProjectTrusted(projectRoot: string): boolean {
   }
 
   return matchesTrustedProject();
+}
+
+function pathEqualsOrContains(candidatePath: string, targetPath: string): boolean {
+  const resolvedCandidate = path.resolve(candidatePath);
+  const resolvedTarget = path.resolve(targetPath);
+  if (resolvedCandidate === resolvedTarget || resolvedCandidate.startsWith(`${resolvedTarget}${path.sep}`)) {
+    return true;
+  }
+
+  try {
+    const realCandidate = fs.realpathSync(candidatePath);
+    const realTarget = fs.realpathSync(targetPath);
+    return realCandidate === realTarget || realCandidate.startsWith(`${realTarget}${path.sep}`);
+  } catch {
+    return false;
+  }
+}
+
+function findLegacyGlobalCodexCleanup(projectRoot: string): LegacyGlobalCodexCleanup | null {
+  const home = process.env.HOME;
+  if (!home) return null;
+
+  const globalConfigPath = path.join(home, ".codex/config.toml");
+  if (!fs.existsSync(globalConfigPath)) return null;
+
+  const content = fs.readFileSync(globalConfigPath, "utf-8");
+  const { content: nextContent, removed, removedContent } = removeTomlSectionGroup(content, "mcp_servers.typegraph");
+  if (!removed) return null;
+
+  const pluginRoot = path.resolve(projectRoot, PLUGIN_DIR_NAME);
+  const quotedPaths = Array.from(removedContent.matchAll(/"([^"\n]+)"/g), (match) => match[1]!);
+  const looksProjectSpecific = quotedPaths.some((quotedPath) =>
+    pathEqualsOrContains(quotedPath, projectRoot) ||
+    pathEqualsOrContains(quotedPath, pluginRoot)
+  );
+
+  if (!looksProjectSpecific) {
+    return null;
+  }
+
+  return { globalConfigPath, nextContent };
+}
+
+function removeLegacyGlobalCodexMcp(cleanup: LegacyGlobalCodexCleanup): void {
+  if (cleanup.nextContent === "") {
+    fs.unlinkSync(cleanup.globalConfigPath);
+  } else {
+    fs.writeFileSync(cleanup.globalConfigPath, cleanup.nextContent);
+  }
+
+  p.log.info("~/.codex/config.toml: removed stale global typegraph MCP server entry for this project");
 }
 
 /** Register the typegraph MCP server in agent-specific config files */
@@ -417,26 +526,19 @@ function registerCodexMcp(projectRoot: string): void {
 function deregisterCodexMcp(projectRoot: string): void {
   const configPath = ".codex/config.toml";
   const fullPath = getCodexConfigPath(projectRoot);
-  if (!fs.existsSync(fullPath)) return;
+  if (fs.existsSync(fullPath)) {
+    const content = fs.readFileSync(fullPath, "utf-8");
+    const { content: nextContent, removed } = removeTomlSectionGroup(content, "mcp_servers.typegraph");
 
-  let content = fs.readFileSync(fullPath, "utf-8");
-  if (!hasCodexMcpSection(content)) return;
-
-  // Remove the [mcp_servers.typegraph] section (stops at next section header or end of file)
-  content = content.replace(
-    /\n?\[mcp_servers\.typegraph\]\n[\s\S]*?(?=\n\[|$)/,
-    ""
-  );
-
-  // Clean up multiple trailing newlines
-  content = content.replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
-
-  if (content.trim() === "") {
-    fs.unlinkSync(fullPath);
-  } else {
-    fs.writeFileSync(fullPath, content);
+    if (removed) {
+      if (nextContent === "") {
+        fs.unlinkSync(fullPath);
+      } else {
+        fs.writeFileSync(fullPath, nextContent);
+      }
+      p.log.info(`${configPath}: removed typegraph MCP server`);
+    }
   }
-  p.log.info(`${configPath}: removed typegraph MCP server`);
 }
 
 // ─── TSConfig Exclude ─────────────────────────────────────────────────────────
@@ -764,16 +866,26 @@ async function setup(yes: boolean): Promise<void> {
 
 // ─── Remove Command ──────────────────────────────────────────────────────────
 
-async function removePlugin(projectRoot: string, pluginDir: string): Promise<void> {
+async function removePlugin(
+  projectRoot: string,
+  pluginDir: string,
+  options: { removeGlobalCodex: boolean; legacyGlobalCodexCleanup: LegacyGlobalCodexCleanup | null }
+): Promise<void> {
   const s = p.spinner();
   s.start("Removing typegraph-mcp...");
 
-  // 1. Remove plugin directory
+  // 1. Deregister MCP server from agent config files while project paths still exist
+  deregisterMcpServers(projectRoot);
+  if (options.removeGlobalCodex && options.legacyGlobalCodexCleanup) {
+    removeLegacyGlobalCodexMcp(options.legacyGlobalCodexCleanup);
+  }
+
+  // 2. Remove plugin directory
   if (fs.existsSync(pluginDir)) {
     fs.rmSync(pluginDir, { recursive: true });
   }
 
-  // 2. Remove .agents/skills/ entries (only typegraph-mcp skills, not the whole dir)
+  // 3. Remove .agents/skills/ entries (only typegraph-mcp skills, not the whole dir)
   const agentsSkillsDir = path.resolve(projectRoot, ".agents/skills");
   for (const skill of SKILL_NAMES) {
     const skillDir = path.join(agentsSkillsDir, skill);
@@ -790,7 +902,7 @@ async function removePlugin(projectRoot: string, pluginDir: string): Promise<voi
     }
   }
 
-  // 3. Remove agent instruction snippet from all known agent files
+  // 4. Remove agent instruction snippet from all known agent files
   const allAgentFiles = AGENT_IDS
     .map((id) => AGENTS[id].agentFile)
     .filter((f): f is string => f !== null);
@@ -813,7 +925,7 @@ async function removePlugin(projectRoot: string, pluginDir: string): Promise<voi
     }
   }
 
-  // 4. Remove --plugin-dir ./plugins/typegraph-mcp from CLAUDE.md
+  // 5. Remove --plugin-dir ./plugins/typegraph-mcp from CLAUDE.md
   const claudeMdPath = path.resolve(projectRoot, "CLAUDE.md");
   if (fs.existsSync(claudeMdPath)) {
     let content = fs.readFileSync(claudeMdPath, "utf-8");
@@ -822,9 +934,6 @@ async function removePlugin(projectRoot: string, pluginDir: string): Promise<voi
   }
 
   s.stop("Removed typegraph-mcp");
-
-  // 5. Deregister MCP server from agent config files
-  deregisterMcpServers(projectRoot);
 
   p.outro("typegraph-mcp has been uninstalled from this project.");
 }
@@ -929,6 +1038,7 @@ async function runVerification(pluginDir: string, selectedAgents: AgentId[]): Pr
 async function remove(yes: boolean): Promise<void> {
   const projectRoot = process.cwd();
   const pluginDir = path.resolve(projectRoot, PLUGIN_DIR_NAME);
+  const cleanGlobalCodex = args.includes("--clean-global-codex");
 
   process.stdout.write("\x1Bc");
   p.intro("TypeGraph MCP Remove");
@@ -946,7 +1056,33 @@ async function remove(yes: boolean): Promise<void> {
     }
   }
 
-  await removePlugin(projectRoot, pluginDir);
+  const legacyGlobalCodexCleanup = findLegacyGlobalCodexCleanup(projectRoot);
+  let removeGlobalCodex = cleanGlobalCodex;
+
+  if (legacyGlobalCodexCleanup && !cleanGlobalCodex && !yes) {
+    const shouldRemoveGlobal = await p.confirm({
+      message: "Also remove the stale global Codex MCP entry for this project from ~/.codex/config.toml?",
+      initialValue: false,
+    });
+    if (p.isCancel(shouldRemoveGlobal)) {
+      p.cancel("Removal cancelled.");
+      process.exit(0);
+    }
+    removeGlobalCodex = shouldRemoveGlobal;
+  }
+
+  await removePlugin(projectRoot, pluginDir, {
+    removeGlobalCodex,
+    legacyGlobalCodexCleanup,
+  });
+
+  if (legacyGlobalCodexCleanup && !removeGlobalCodex) {
+    p.log.warn(
+      "Left a stale global Codex MCP entry for this project in ~/.codex/config.toml. " +
+      "Codex may show MCP startup warnings or errors until you remove it. " +
+      "Re-run `typegraph-mcp remove --clean-global-codex` or remove the `typegraph` block manually."
+    );
+  }
 }
 
 // ─── Check Command ───────────────────────────────────────────────────────────

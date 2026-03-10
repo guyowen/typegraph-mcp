@@ -128,8 +128,12 @@ typegraph-mcp <command> [options]
   bench    Run benchmarks (token, latency, accuracy)
   start    Start the MCP server (stdin/stdout)
 
-  --yes    Skip prompts     --help    Show help
+  --yes                 Skip prompts
+  --clean-global-codex  Also remove a stale global Codex MCP entry for this project
+  --help                Show help
 ```
+
+`remove` always cleans up project-local config. If it detects a legacy global `~/.codex/config.toml` entry that points at the current project, it will ask before removing it in interactive mode. In non-interactive mode, pass `--clean-global-codex` to allow that global cleanup.
 
 ## Troubleshooting
 
