@@ -102,6 +102,66 @@ function testTsserver(projectRoot: string): Promise<boolean> {
   });
 }
 
+function readProjectCodexConfig(projectRoot: string): string | null {
+  const configPath = path.resolve(projectRoot, ".codex/config.toml");
+  if (!fs.existsSync(configPath)) return null;
+  return fs.readFileSync(configPath, "utf-8");
+}
+
+function hasCodexTypegraphRegistration(content: string): boolean {
+  return /\[mcp_servers\.typegraph\]/.test(content);
+}
+
+function hasCompleteCodexTypegraphRegistration(content: string): boolean {
+  return (
+    hasCodexTypegraphRegistration(content) &&
+    /command\s*=\s*"[^"]+"/.test(content) &&
+    /args\s*=\s*\[[\s\S]*"tsx"/.test(content) &&
+    /TYPEGRAPH_PROJECT_ROOT\s*=/.test(content) &&
+    /TYPEGRAPH_TSCONFIG\s*=/.test(content)
+  );
+}
+
+function hasTrustedCodexProject(projectRoot: string): boolean | null {
+  const home = process.env.HOME;
+  if (!home) return null;
+
+  const globalConfigPath = path.join(home, ".codex/config.toml");
+  if (!fs.existsSync(globalConfigPath)) return null;
+
+  const lines = fs.readFileSync(globalConfigPath, "utf-8").split(/\r?\n/);
+  let currentProject: string | null = null;
+  let currentTrusted = false;
+
+  const matchesTrustedProject = (): boolean =>
+    currentProject !== null &&
+    currentTrusted &&
+    (projectRoot === currentProject || projectRoot.startsWith(currentProject + path.sep));
+
+  for (const line of lines) {
+    const sectionMatch = line.match(/^\[projects\."([^"]+)"\]\s*$/);
+    if (sectionMatch) {
+      if (matchesTrustedProject()) return true;
+      currentProject = path.resolve(sectionMatch[1]!);
+      currentTrusted = false;
+      continue;
+    }
+
+    if (line.startsWith("[")) {
+      if (matchesTrustedProject()) return true;
+      currentProject = null;
+      currentTrusted = false;
+      continue;
+    }
+
+    if (currentProject && /\btrust_level\s*=\s*"trusted"/.test(line)) {
+      currentTrusted = true;
+    }
+  }
+
+  return matchesTrustedProject();
+}
+
 // ─── Main ────────────────────────────────────────────────────────────────────
 
 export async function main(configOverride?: TypegraphConfig): Promise<CheckResult> {
@@ -142,10 +202,10 @@ export async function main(configOverride?: TypegraphConfig): Promise<CheckResul
   // 1. Node.js version
   const nodeVersion = process.version;
   const nodeMajor = parseInt(nodeVersion.slice(1).split(".")[0]!, 10);
-  if (nodeMajor >= 18) {
-    pass(`Node.js ${nodeVersion} (>= 18 required)`);
+  if (nodeMajor >= 22) {
+    pass(`Node.js ${nodeVersion} (>= 22 required)`);
   } else {
-    fail(`Node.js ${nodeVersion} is too old`, "Upgrade Node.js to >= 18");
+    fail(`Node.js ${nodeVersion} is too old`, "Upgrade Node.js to >= 22");
   }
 
   // 2. tsx availability (if we're running, tsx works — but check it's in the project)
@@ -186,18 +246,50 @@ export async function main(configOverride?: TypegraphConfig): Promise<CheckResul
   // Check for plugin .mcp.json in the tool directory (embedded plugin install)
   const pluginMcpPath = path.join(toolDir, ".mcp.json");
   const hasPluginMcp = fs.existsSync(pluginMcpPath) && fs.existsSync(path.join(toolDir, ".claude-plugin/plugin.json"));
+  const projectCodexConfig = readProjectCodexConfig(projectRoot);
+  const hasProjectCodexRegistration =
+    projectCodexConfig !== null && hasCompleteCodexTypegraphRegistration(projectCodexConfig);
   const codexGet = spawnSync("codex", ["mcp", "get", "typegraph"], {
     stdio: "pipe",
     encoding: "utf-8",
   });
-  const hasCodexRegistration = codexGet.status === 0;
+  const hasGlobalCodexRegistration = codexGet.status === 0;
   if (process.env.CLAUDE_PLUGIN_ROOT) {
     pass("MCP registered via plugin (CLAUDE_PLUGIN_ROOT set)");
   } else if (hasPluginMcp) {
     pass("MCP registered via plugin (.mcp.json + .claude-plugin/ present)");
-  } else if (hasCodexRegistration) {
-    pass("MCP registered in Codex CLI");
+  } else if (projectCodexConfig !== null) {
+    const codexConfigPath = path.resolve(projectRoot, ".codex/config.toml");
+    const hasSection = hasCodexTypegraphRegistration(projectCodexConfig);
+    const hasCommand = /command\s*=\s*"[^"]+"/.test(projectCodexConfig);
+    const hasArgs = /args\s*=\s*\[[\s\S]*"tsx"/.test(projectCodexConfig);
+    const hasEnvRoot = /TYPEGRAPH_PROJECT_ROOT\s*=/.test(projectCodexConfig);
+    const hasEnvTsconfig = /TYPEGRAPH_TSCONFIG\s*=/.test(projectCodexConfig);
+    if (hasProjectCodexRegistration) {
+      pass("MCP registered in project .codex/config.toml");
+      const trusted = hasTrustedCodexProject(projectRoot);
+      if (trusted === false) {
+        warn(
+          "Project Codex config may be ignored",
+          "Add the project (or a parent directory) to ~/.codex/config.toml with trust_level = \"trusted\""
+        );
+      }
+    } else {
+      const issues: string[] = [];
+      if (!hasSection) issues.push("[mcp_servers.typegraph] section is missing");
+      if (!hasCommand) issues.push("command is missing");
+      if (!hasArgs) issues.push("args should include 'tsx'");
+      if (!hasEnvRoot) issues.push("TYPEGRAPH_PROJECT_ROOT is missing");
+      if (!hasEnvTsconfig) issues.push("TYPEGRAPH_TSCONFIG is missing");
+      fail(
+        `Project .codex/config.toml registration incomplete: ${issues.join(", ")}`,
+        `Update ${codexConfigPath} with a complete [mcp_servers.typegraph] entry`
+      );
+    }
+  } else if (hasGlobalCodexRegistration) {
+    pass("MCP registered in global Codex CLI config");
   } else {
+    const codexConfigPath = path.resolve(projectRoot, ".codex/config.toml");
     const mcpJsonPath = path.resolve(projectRoot, ".claude/mcp.json");
     if (fs.existsSync(mcpJsonPath)) {
       try {
@@ -244,7 +336,10 @@ export async function main(configOverride?: TypegraphConfig): Promise<CheckResul
         );
       }
     } else {
-      fail(".claude/mcp.json not found", `Create .claude/mcp.json with typegraph server registration`);
+      fail(
+        "No MCP registration found",
+        `Create ${codexConfigPath} with [mcp_servers.typegraph] or create .claude/mcp.json with typegraph server registration`
+      );
     }
   }
 

@@ -8,6 +8,10 @@
     "type": "git",
     "url": "https://github.com/guyowen/typegraph-mcp.git"
   },
+  "packageManager": "npm@11.5.2",
+  "engines": {
+    "node": ">=22"
+  },
   "bin": {
     "typegraph-mcp": "./dist/cli.js",
     "typegraph": "./dist/cli.js"

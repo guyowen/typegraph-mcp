@@ -80,13 +80,13 @@ This gives you 14 MCP tools, 5 workflow skills that teach Claude *when* and *how
 
 **Other agents** (Cursor, Codex CLI, Gemini CLI, GitHub Copilot) — restart your agent session. The MCP server and skills are already configured.
 
-For **Codex CLI**, setup now registers the server with `codex mcp add` using absolute paths so the tools work even when Codex launches from outside your project root.
+For **Codex CLI**, setup now writes a project-local `.codex/config.toml` entry using absolute paths so the tools stay scoped to the project and still work when Codex launches from a subdirectory.
 
 First query takes ~2s (tsserver warmup). Subsequent queries: 1-60ms.
 
 ## Requirements
 
-- **Node.js** >= 18
+- **Node.js** >= 22
 - **TypeScript** >= 5.0 in the target project
 - **npm** for dependency installation
 
@@ -141,30 +141,31 @@ npx typegraph-mcp check
 
 | Symptom | Fix |
 |---|---|
-| Server won't start | `cd plugins/typegraph-mcp && npm install` |
+| Server won't start | `cd plugins/typegraph-mcp && npm install --include=optional` |
 | "TypeScript not found" | Add `typescript` to devDependencies |
 | Tools return empty results | Check `TYPEGRAPH_TSCONFIG` points to the right tsconfig |
 | Build errors from plugins/ | Add `"plugins/**"` to tsconfig.json `exclude` array |
+| `@esbuild/*` or `@rollup/*` package missing | Reinstall with Node 22: `npm install --include=optional` |
 | "npm warn Unknown project config" | Safe to ignore — caused by pnpm settings in your `.npmrc` that npm doesn't recognize |
 
 ## Manual MCP configuration
 
 ### Codex CLI
 
-Register the server with absolute paths:
+Add this to your project's `.codex/config.toml`:
 
-```bash
-codex mcp add typegraph \
-  --env TYPEGRAPH_PROJECT_ROOT=/absolute/path/to/your-project \
-  --env TYPEGRAPH_TSCONFIG=/absolute/path/to/your-project/tsconfig.json \
-  -- npx tsx /absolute/path/to/your-project/plugins/typegraph-mcp/server.ts
+```toml
+[mcp_servers.typegraph]
+command = "npx"
+args = ["tsx", "/absolute/path/to/your-project/plugins/typegraph-mcp/server.ts"]
+env = { TYPEGRAPH_PROJECT_ROOT = "/absolute/path/to/your-project", TYPEGRAPH_TSCONFIG = "/absolute/path/to/your-project/tsconfig.json" }
 ```
 
-Verify with:
+Codex only loads project `.codex/config.toml` files for trusted projects. If needed, add this to `~/.codex/config.toml`:
 
-```bash
-codex mcp get typegraph
-codex mcp list
+```toml
+[projects."/absolute/path/to/your-project"]
+trust_level = "trusted"
 ```
 
 ### JSON-based MCP clients
@@ -213,7 +214,8 @@ Two subsystems start concurrently:
 ```bash
 git clone https://github.com/guyowen/typegraph-mcp.git
 cd typegraph-mcp
-npm install
+nvm use
+npm install --include=optional
 ```
 
 ### Run locally against a project

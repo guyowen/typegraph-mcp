@@ -15,7 +15,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { execSync, spawnSync } from "node:child_process";
+import { execSync } from "node:child_process";
 import * as p from "@clack/prompts";
 import { resolveConfig } from "./config.js";
 
@@ -192,6 +192,87 @@ function getAbsoluteMcpServerEntry(projectRoot: string): {
   };
 }
 
+function getCodexConfigPath(projectRoot: string): string {
+  return path.resolve(projectRoot, ".codex/config.toml");
+}
+
+function hasCodexMcpSection(content: string): boolean {
+  return content.includes("[mcp_servers.typegraph]");
+}
+
+function upsertCodexMcpSection(content: string, block: string): { content: string; changed: boolean } {
+  const sectionRe = /\n?\[mcp_servers\.typegraph\]\n[\s\S]*?(?=\n\[|$)/;
+  const normalizedBlock = block.trim();
+
+  if (sectionRe.test(content)) {
+    const existingSection = (content.match(sectionRe)?.[0] ?? "").trim();
+    if (existingSection === normalizedBlock) {
+      return { content, changed: false };
+    }
+
+    const nextContent = content.replace(sectionRe, `\n${normalizedBlock}\n`);
+    return { content: nextContent.trimEnd() + "\n", changed: true };
+  }
+
+  const nextContent = content
+    ? content.trimEnd() + "\n\n" + normalizedBlock + "\n"
+    : normalizedBlock + "\n";
+  return { content: nextContent, changed: true };
+}
+
+function makeCodexMcpBlock(projectRoot: string): string {
+  const absoluteEntry = getAbsoluteMcpServerEntry(projectRoot);
+  return [
+    "",
+    "[mcp_servers.typegraph]",
+    `command = "${absoluteEntry.command}"`,
+    `args = ["${absoluteEntry.args[0]}", "${absoluteEntry.args[1]}"]`,
+    `env = { TYPEGRAPH_PROJECT_ROOT = "${absoluteEntry.env.TYPEGRAPH_PROJECT_ROOT}", TYPEGRAPH_TSCONFIG = "${absoluteEntry.env.TYPEGRAPH_TSCONFIG}" }`,
+    "",
+  ].join("\n");
+}
+
+function isCodexProjectTrusted(projectRoot: string): boolean {
+  const home = process.env.HOME;
+  if (!home) return false;
+
+  const globalConfigPath = path.join(home, ".codex/config.toml");
+  if (!fs.existsSync(globalConfigPath)) return false;
+
+  const content = fs.readFileSync(globalConfigPath, "utf-8");
+  const lines = content.split(/\r?\n/);
+  let currentProject: string | null = null;
+  let currentTrusted = false;
+
+  const matchesTrustedProject = (): boolean =>
+    currentProject !== null &&
+    currentTrusted &&
+    (projectRoot === currentProject || projectRoot.startsWith(currentProject + path.sep));
+
+  for (const line of lines) {
+    const sectionMatch = line.match(/^\[projects\."([^"]+)"\]\s*$/);
+    if (sectionMatch) {
+      if (matchesTrustedProject()) return true;
+      currentProject = path.resolve(sectionMatch[1]!);
+      currentTrusted = false;
+      continue;
+    }
+
+    if (line.startsWith("[")) {
+      if (matchesTrustedProject()) return true;
+      currentProject = null;
+      currentTrusted = false;
+      continue;
+    }
+
+    if (currentProject && /\btrust_level\s*=\s*"trusted"/.test(line)) {
+      currentTrusted = true;
+    }
+  }
+
+  return matchesTrustedProject();
+}
+
 /** Register the typegraph MCP server in agent-specific config files */
 function registerMcpServers(projectRoot: string, selectedAgents: AgentId[]): void {
   if (selectedAgents.includes("cursor")) {
@@ -274,104 +355,41 @@ function deregisterJsonMcp(projectRoot: string, configPath: string, rootKey: str
 
 /** Register MCP server in Codex CLI's TOML config */
 function registerCodexMcp(projectRoot: string): void {
-  const absoluteEntry = getAbsoluteMcpServerEntry(projectRoot);
-
-  const codexGet = spawnSync("codex", ["mcp", "get", "typegraph"], {
-    stdio: "pipe",
-    encoding: "utf-8",
-  });
-
-  if (codexGet.status === 0) {
-    const output = `${codexGet.stdout ?? ""}${codexGet.stderr ?? ""}`;
-    const hasServerPath = output.includes(absoluteEntry.args[1]!);
-    const hasProjectRoot = output.includes("TYPEGRAPH_PROJECT_ROOT=*****") || output.includes(projectRoot);
-    const hasTsconfig = output.includes("TYPEGRAPH_TSCONFIG=*****") || output.includes(path.resolve(projectRoot, "tsconfig.json"));
-    if (hasServerPath && hasProjectRoot && hasTsconfig) {
-      p.log.info("Codex CLI: typegraph MCP server already registered");
-      return;
-    }
-    spawnSync("codex", ["mcp", "remove", "typegraph"], {
-      stdio: "pipe",
-      encoding: "utf-8",
-    });
-  }
-
-  const codexAdd = spawnSync(
-    "codex",
-    [
-      "mcp",
-      "add",
-      "typegraph",
-      "--env",
-      `TYPEGRAPH_PROJECT_ROOT=${absoluteEntry.env.TYPEGRAPH_PROJECT_ROOT}`,
-      "--env",
-      `TYPEGRAPH_TSCONFIG=${absoluteEntry.env.TYPEGRAPH_TSCONFIG}`,
-      "--",
-      absoluteEntry.command,
-      ...absoluteEntry.args,
-    ],
-    {
-      stdio: "pipe",
-      encoding: "utf-8",
-    }
-  );
-
-  if (codexAdd.status === 0) {
-    p.log.success("Codex CLI: registered typegraph MCP server");
-    return;
-  }
-
-  p.log.warn(
-    `Codex CLI registration failed — falling back to ${".codex/config.toml"}`
-  );
-
   const configPath = ".codex/config.toml";
-  const fullPath = path.resolve(projectRoot, configPath);
+  const fullPath = getCodexConfigPath(projectRoot);
+  const block = makeCodexMcpBlock(projectRoot);
   let content = "";
 
   if (fs.existsSync(fullPath)) {
     content = fs.readFileSync(fullPath, "utf-8");
-    // Already registered?
-    if (content.includes("[mcp_servers.typegraph]")) {
-      p.log.info(`${configPath}: typegraph MCP server already registered`);
-      return;
-    }
   }
-
-  const block = [
-    "",
-    "[mcp_servers.typegraph]",
-    `command = "${absoluteEntry.command}"`,
-    `args = ["${absoluteEntry.args[0]}", "${absoluteEntry.args[1]}"]`,
-    `env = { TYPEGRAPH_PROJECT_ROOT = "${absoluteEntry.env.TYPEGRAPH_PROJECT_ROOT}", TYPEGRAPH_TSCONFIG = "${absoluteEntry.env.TYPEGRAPH_TSCONFIG}" }`,
-    "",
-  ].join("\n");
 
   const dir = path.dirname(fullPath);
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
-  const newContent = content ? content.trimEnd() + "\n" + block : block.trimStart();
-  fs.writeFileSync(fullPath, newContent);
-  p.log.success(`${configPath}: registered typegraph MCP server`);
+
+  const { content: nextContent, changed } = upsertCodexMcpSection(content, block);
+  if (changed) {
+    fs.writeFileSync(fullPath, nextContent);
+    p.log.success(`${configPath}: registered typegraph MCP server`);
+  } else {
+    p.log.info(`${configPath}: typegraph MCP server already registered`);
+  }
+
+  if (!isCodexProjectTrusted(projectRoot)) {
+    p.log.info(`Codex CLI: trust ${projectRoot} in ~/.codex/config.toml to load project MCP settings`);
+  }
 }
 
 /** Deregister MCP server from Codex CLI's TOML config */
 function deregisterCodexMcp(projectRoot: string): void {
-  const codexRemove = spawnSync("codex", ["mcp", "remove", "typegraph"], {
-    stdio: "pipe",
-    encoding: "utf-8",
-  });
-  if (codexRemove.status === 0) {
-    p.log.info("Codex CLI: removed typegraph MCP server");
-  }
-
   const configPath = ".codex/config.toml";
-  const fullPath = path.resolve(projectRoot, configPath);
+  const fullPath = getCodexConfigPath(projectRoot);
   if (!fs.existsSync(fullPath)) return;
 
   let content = fs.readFileSync(fullPath, "utf-8");
-  if (!content.includes("[mcp_servers.typegraph]")) return;
+  if (!hasCodexMcpSection(content)) return;
 
   // Remove the [mcp_servers.typegraph] section (stops at next section header or end of file)
   content = content.replace(
@@ -643,12 +661,12 @@ async function setup(yes: boolean): Promise<void> {
 
   s.message("Installing dependencies...");
   try {
-    execSync("npm install", { cwd: targetDir, stdio: "pipe" });
+    execSync("npm install --include=optional", { cwd: targetDir, stdio: "pipe" });
     s.stop(`${isUpdate ? "Updated" : "Installed"} ${copied} files with dependencies`);
   } catch (err) {
     s.stop(`${isUpdate ? "Updated" : "Installed"} ${copied} files`);
     p.log.warn(`Dependency install failed: ${err instanceof Error ? err.message : String(err)}`);
-    p.log.info(`Run manually: cd ${PLUGIN_DIR_NAME} && npm install`);
+    p.log.info(`Run manually: cd ${PLUGIN_DIR_NAME} && npm install --include=optional`);
   }
 
   // 4. Copy skills to .agents/skills/ for cross-platform discovery
