@@ -40,10 +40,25 @@ interface AgentDef {
 const AGENT_SNIPPET = `
 ## TypeScript Navigation (typegraph-mcp)
 
-Use the \`ts_*\` MCP tools instead of grep/glob for navigating TypeScript code. They resolve through barrel files, re-exports, and project references — returning precise results, not string matches.
+Where suitable, use the \`ts_*\` MCP tools instead of grep/glob for navigating TypeScript code. They resolve through barrel files, re-exports, and project references and return semantic results instead of string matches.
 
-- **Point queries** (tsserver): \`ts_find_symbol\`, \`ts_definition\`, \`ts_references\`, \`ts_type_info\`, \`ts_navigate_to\`, \`ts_trace_chain\`, \`ts_blast_radius\`, \`ts_module_exports\`
-- **Graph queries** (import graph): \`ts_dependency_tree\`, \`ts_dependents\`, \`ts_import_cycles\`, \`ts_shortest_path\`, \`ts_subgraph\`, \`ts_module_boundary\`
+- Point queries: \`ts_find_symbol\`, \`ts_definition\`, \`ts_references\`, \`ts_type_info\`, \`ts_navigate_to\`, \`ts_trace_chain\`, \`ts_blast_radius\`, \`ts_module_exports\`
+- Graph queries: \`ts_dependency_tree\`, \`ts_dependents\`, \`ts_import_cycles\`, \`ts_shortest_path\`, \`ts_subgraph\`, \`ts_module_boundary\`
+
+Start with the navigation tools before reading entire files. Use direct file reads only after the MCP tools identify the exact symbols or lines that matter.
+
+Use \`rg\` or \`grep\` when semantic symbol navigation is not the right tool, especially for:
+
+- docs, config, SQL, migrations, JSON, env vars, route strings, and other non-TypeScript assets
+- broad text discovery when you do not yet know the symbol name
+- exact string matching across the repo
+- validating wording or finding repeated plan/document references
+
+Practical rule:
+
+- use \`ts_*\` first for TypeScript symbol definition, references, types, and dependency analysis
+- use \`rg\`/\`grep\` for text search and non-TypeScript exploration
+- combine both when a task spans TypeScript code and surrounding docs/config
 `.trimStart();
 
 const SNIPPET_MARKER = "## TypeScript Navigation (typegraph-mcp)";
@@ -808,39 +823,35 @@ async function setupAgentInstructions(projectRoot: string, selectedAgents: Agent
     return; // No agents with instruction files selected (e.g. Cursor only)
   }
 
-  // Find existing files, resolve symlinks to deduplicate
+  // Ensure each selected agent file exists and has the snippet once. Resolve
+  // symlinks to avoid writing duplicate content through multiple aliases.
   const seenRealPaths = new Map<string, string>(); // realPath -> first agentFile name
-  const existingFiles: { file: string; realPath: string; hasSnippet: boolean }[] = [];
   for (const agentFile of agentFiles) {
     const filePath = path.resolve(projectRoot, agentFile);
-    if (!fs.existsSync(filePath)) continue;
-    const realPath = fs.realpathSync(filePath);
+    if (!fs.existsSync(filePath)) {
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      fs.writeFileSync(filePath, AGENT_SNIPPET + "\n");
+      p.log.success(`${agentFile}: created with typegraph-mcp instructions`);
+      continue;
+    }
 
+    const realPath = fs.realpathSync(filePath);
     const previousFile = seenRealPaths.get(realPath);
     if (previousFile) {
       p.log.info(`${agentFile}: same file as ${previousFile} (skipped)`);
       continue;
     }
-    seenRealPaths.set(realPath, agentFile);
-    const content = fs.readFileSync(filePath, "utf-8");
-    existingFiles.push({ file: agentFile, realPath, hasSnippet: content.includes(SNIPPET_MARKER) });
-  }
 
-  if (existingFiles.length === 0) {
-    p.log.warn(`No agent instruction files found (${agentFiles.join(", ")})`);
-    p.note(AGENT_SNIPPET, "Add this snippet to your agent instructions file");
-  } else if (existingFiles.some((f) => f.hasSnippet)) {
-    for (const f of existingFiles) {
-      if (f.hasSnippet) {
-        p.log.info(`${f.file}: already has typegraph-mcp instructions`);
-      }
+    seenRealPaths.set(realPath, agentFile);
+    const content = fs.readFileSync(realPath, "utf-8");
+    if (content.includes(SNIPPET_MARKER)) {
+      p.log.info(`${agentFile}: already has typegraph-mcp instructions`);
+      continue;
     }
-  } else {
-    const target = existingFiles[0]!;
-    const content = fs.readFileSync(target.realPath, "utf-8");
+
     const appendContent = (content.endsWith("\n") ? "" : "\n") + "\n" + AGENT_SNIPPET;
-    fs.appendFileSync(target.realPath, appendContent);
-    p.log.success(`${target.file}: appended typegraph-mcp instructions`);
+    fs.appendFileSync(realPath, appendContent);
+    p.log.success(`${agentFile}: appended typegraph-mcp instructions`);
   }
 
   // Update --plugin-dir line in CLAUDE.md if Claude Code is selected
