@@ -29,6 +29,8 @@ Use **ts_type_info** — returns the same info as hovering in VS Code. Includes 
 ### "What are all the exports of this file?"
 Use **ts_module_exports** — lists all exported symbols with their resolved types.
 
+If the file is a top-level barrel (`index.ts`, re-export hub), the result may be sparse or unhelpful for architecture discovery. For quick project insight, prefer composition modules such as entrypoints, routers, handler modules, service composition roots, or API modules that wire concrete behavior together.
+
 ### "Where is X used?"
 Use **ts_references** for all semantic references. Unlike grep, this returns only real code references, not string matches in comments or unrelated variables.
 
@@ -63,6 +65,7 @@ Use **ts_module_boundary** — analyzes incoming/outgoing edges, shared dependen
 3. **Combine tools for workflows.** Impact analysis = ts_blast_radius + ts_dependents. Refactor safety = ts_trace_chain + ts_import_cycles.
 4. **Graph queries are instant** (~0.1ms). Point queries are fast (~2-50ms). Don't hesitate to use them liberally.
 5. **First query may be slow** (~2s) as tsserver warms up. All subsequent queries are fast.
+6. **For fast architecture reads, start at composition modules, not barrels.** Barrels are useful for API shape, but entrypoints and composition roots tell you how the system is actually wired.
 
 ## Tool Reference
 

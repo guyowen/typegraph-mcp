@@ -59,6 +59,8 @@ Where suitable, use the \`ts_*\` MCP tools instead of grep/glob for navigating T
 
 Start with the navigation tools before reading entire files. Use direct file reads only after the MCP tools identify the exact symbols or lines that matter.
 
+For quick architectural insight, prefer composition modules and entrypoints over top-level barrel files. If \`ts_module_exports\` on an \`index.ts\` or other barrel looks empty or uninformative, pivot to the app entrypoint, router, handler, service composition root, or API module that wires real behavior together.
+
 Use \`rg\` or \`grep\` when semantic symbol navigation is not the right tool, especially for:
 
 - docs, config, SQL, migrations, JSON, env vars, route strings, and other non-TypeScript assets

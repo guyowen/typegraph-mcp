@@ -54,6 +54,8 @@ Glob: **/index.ts, **/main.ts, **/entry*.ts, **/worker*.ts, **/server.ts, **/app
 
 Exclude `node_modules/` hits. The results are your starting nodes.
 
+Prefer these composition modules over top-level barrel files for your first passes. Barrels often describe the public API surface, but entry points and composition roots reveal how the system is actually wired.
+
 ### 1b. Dependency tree from every entry point (depth 2)
 
 For each entry point, run:
@@ -120,6 +122,8 @@ Record for each:
 - **Export count** — files with 15+ exports may be doing too much
 - **Export types** — classes, interfaces, types, constants, functions. A file that exports 8 interfaces is a contract definition. A file that exports 8 constants is a configuration. A file that exports a mix of class + error + test layer is a service module.
 - **Naming patterns** — do exports follow consistent naming (`*Service`, `*Error`, `*Test`, `*Live`)? Consistency across files is evidence of intentional patterns.
+
+If a file is a barrel and `ts_module_exports` is sparse or uninformative, do not stop there. Pivot to the concrete composition modules it fronts and use `ts_dependency_tree` or `ts_module_exports` there instead.
 
 ### 2c. Module boundaries — how coupled are directories?
 
