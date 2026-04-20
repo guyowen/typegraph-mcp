@@ -216,7 +216,7 @@ function distToSource(resolvedPath: string, projectRoot: string): string {
   return resolvedPath;
 }
 
-function resolveImport(
+export function resolveProjectImport(
   resolver: ResolverFactory,
   fromDir: string,
   specifier: string,
@@ -287,7 +287,7 @@ function buildForwardEdges(
     const fromDir = path.dirname(filePath);
 
     for (const raw of rawImports) {
-      const target = resolveImport(resolver, fromDir, raw.specifier, projectRoot);
+      const target = resolveProjectImport(resolver, fromDir, raw.specifier, projectRoot);
       if (target) {
         edges.push({
           target,
@@ -397,7 +397,7 @@ export function updateFile(
   const fromDir = path.dirname(filePath);
   const newEdges: ImportEdge[] = [];
   for (const raw of rawImports) {
-    const target = resolveImport(resolver, fromDir, raw.specifier, projectRoot);
+    const target = resolveProjectImport(resolver, fromDir, raw.specifier, projectRoot);
     if (target) {
       newEdges.push({
         target,

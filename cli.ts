@@ -601,10 +601,13 @@ function ensureTsconfigExclude(projectRoot: string): void {
 
   try {
     const raw = fs.readFileSync(tsconfigPath, "utf-8");
-    if (/["']plugins(?:\/\*\*|\/\*|)["']/.test(raw)) return;
+    const excludeArrayMatch = raw.match(/("exclude"\s*:\s*\[)([\s\S]*?)(\])/);
+    if (excludeArrayMatch && /["']plugins(?:\/\*\*|\/\*|)["']/.test(excludeArrayMatch[2])) {
+      return;
+    }
 
     // Insert "plugins/**" into the exclude array in the original file
-    if (raw.includes('"exclude"')) {
+    if (excludeArrayMatch) {
       // Existing exclude array — append to it
       const updated = raw.replace(
         /("exclude"\s*:\s*\[)([\s\S]*?)(\])/,

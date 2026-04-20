@@ -17,9 +17,16 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { parseSync } from "oxc-parser";
+import type { ResolverFactory } from "oxc-resolver";
 import { z } from "zod";
 import { TsServerClient, type NavBarItem } from "./tsserver-client.js";
-import { buildGraph, startWatcher, type ModuleGraph } from "./module-graph.js";
+import {
+  buildGraph,
+  resolveProjectImport,
+  startWatcher,
+  type ModuleGraph,
+} from "./module-graph.js";
 import {
   dependencyTree,
   dependents,
@@ -44,6 +51,7 @@ const client = new TsServerClient(projectRoot, tsconfigPath);
 
 // Module graph — initialized in main(), used by graph tools
 let moduleGraph: ModuleGraph;
+let moduleResolver: ResolverFactory;
 
 const mcpServer = new McpServer({
   name: "typegraph",
@@ -165,6 +173,347 @@ async function resolveParams(params: {
     return { file: resolved.file, line: resolved.line, column: resolved.column };
   }
   return { error: "Either line+column or symbol must be provided" };
+}
+
+type ModuleExportRecord = {
+  symbol: string;
+  kind: string;
+  line: number;
+  type: string | null;
+  exportKind: "value" | "type";
+  isTypeOnly: boolean;
+  isNamespace: boolean;
+  source: "local" | "re-export" | "star-re-export";
+  from: string | null;
+  definedIn: string;
+  definedLine: number | null;
+};
+
+type StaticExportEntry = ReturnType<typeof parseSync>["module"]["staticExports"][number]["entries"][number];
+
+const exportKinds = new Set([
+  "function",
+  "const",
+  "class",
+  "interface",
+  "type",
+  "enum",
+  "var",
+  "let",
+  "method",
+]);
+
+function exportPriority(source: ModuleExportRecord["source"]): number {
+  switch (source) {
+    case "local":
+      return 3;
+    case "re-export":
+      return 2;
+    case "star-re-export":
+      return 1;
+  }
+}
+
+function exportKey(item: Pick<ModuleExportRecord, "symbol" | "exportKind">): string {
+  return `${item.symbol}:${item.exportKind}`;
+}
+
+function sameExportOrigin(a: ModuleExportRecord, b: ModuleExportRecord): boolean {
+  return (
+    a.symbol === b.symbol &&
+    a.exportKind === b.exportKind &&
+    a.from === b.from &&
+    a.definedIn === b.definedIn &&
+    a.definedLine === b.definedLine
+  );
+}
+
+function kindImpliesTypeOnly(kind: string): boolean {
+  return kind === "type" || kind === "interface";
+}
+
+function normalizeExportKindLabel(
+  kind: string,
+  exportKind: ModuleExportRecord["exportKind"]
+): string {
+  if (exportKind === "type" && !kindImpliesTypeOnly(kind)) {
+    return "type";
+  }
+  return kind;
+}
+
+function upsertExport(
+  map: Map<string, ModuleExportRecord>,
+  conflicts: Set<string>,
+  nextExport: ModuleExportRecord
+): void {
+  const key = exportKey(nextExport);
+  if (conflicts.has(key)) {
+    if (nextExport.source === "star-re-export") return;
+    conflicts.delete(key);
+    map.set(key, nextExport);
+    return;
+  }
+
+  const existing = map.get(key);
+  if (
+    existing &&
+    existing.source === "star-re-export" &&
+    nextExport.source === "star-re-export" &&
+    !sameExportOrigin(existing, nextExport)
+  ) {
+    map.delete(key);
+    conflicts.add(key);
+    return;
+  }
+
+  if (!existing || exportPriority(nextExport.source) > exportPriority(existing.source)) {
+    map.set(key, nextExport);
+  }
+}
+
+function offsetToLineColumn(source: string, offset: number | null | undefined): {
+  line: number;
+  column: number;
+} {
+  const safeOffset = Math.max(0, Math.min(offset ?? 0, source.length));
+  const prefix = source.slice(0, safeOffset);
+  const lines = prefix.split("\n");
+  return {
+    line: lines.length,
+    column: (lines.at(-1)?.length ?? 0) + 1,
+  };
+}
+
+function normalizeExistingPath(filePath: string): string {
+  const resolved = path.resolve(filePath);
+  try {
+    return fs.realpathSync.native(resolved);
+  } catch {
+    return resolved;
+  }
+}
+
+const normalizedProjectRoot = normalizeExistingPath(projectRoot);
+
+function projectPath(file: string): string {
+  return path.isAbsolute(file) ? relPath(file) : file;
+}
+
+function exportSymbol(entry: StaticExportEntry): string | null {
+  if (entry.exportName.kind === "Default") return "default";
+  return entry.exportName.name ?? entry.localName.name ?? entry.importName.name;
+}
+
+function exportLookupOffset(entry: StaticExportEntry): number | null | undefined {
+  if ((entry as { moduleRequest?: { value: string } }).moduleRequest) {
+    return entry.importName.start ?? entry.exportName.start ?? entry.start;
+  }
+  if (entry.exportName.kind === "Default") {
+    return entry.localName.start ?? entry.exportName.start ?? entry.start;
+  }
+  return entry.exportName.start ?? entry.localName.start ?? entry.start;
+}
+
+async function resolveExportMetadata(
+  file: string,
+  line: number,
+  column: number,
+  fallbackKind: string
+): Promise<{
+  kind: string;
+  type: string | null;
+  definedIn: string;
+  definedLine: number | null;
+}> {
+  const defs = await client.definition(file, line, column);
+  const def = defs[0] ?? null;
+
+  let info = await client.quickinfo(file, line, column);
+  if ((!info || info.kind === "alias") && def) {
+    info = (await client.quickinfo(def.file, def.start.line, def.start.offset)) ?? info;
+  }
+
+  return {
+    kind: info?.kind ?? fallbackKind,
+    type: info?.displayString ?? null,
+    definedIn: projectPath(def?.file ?? file),
+    definedLine: def?.start.line ?? null,
+  };
+}
+
+async function getModuleExports(
+  file: string,
+  visited = new Set<string>()
+): Promise<ModuleExportRecord[]> {
+  const relFile = path.isAbsolute(file) ? relPath(file) : file;
+  const absFile = normalizeExistingPath(client.resolvePath(relFile));
+  if (visited.has(absFile)) return [];
+
+  const nextVisited = new Set(visited);
+  nextVisited.add(absFile);
+
+  const exportMap = new Map<string, ModuleExportRecord>();
+  const conflictingStarExports = new Set<string>();
+
+  let source: string;
+  try {
+    source = fs.readFileSync(absFile, "utf-8");
+  } catch {
+    return [...exportMap.values()];
+  }
+
+  let parsed: ReturnType<typeof parseSync>;
+  try {
+    parsed = parseSync(absFile, source);
+  } catch {
+    return [...exportMap.values()];
+  }
+
+  for (const exp of parsed.module.staticExports) {
+    for (const entry of exp.entries) {
+      const moduleRequest = (entry as { moduleRequest?: { value: string } }).moduleRequest;
+      if (!moduleRequest) continue;
+
+      const targetFile = resolveProjectImport(
+        moduleResolver,
+        path.dirname(absFile),
+        moduleRequest.value,
+        projectRoot
+      );
+
+      const exportLoc = offsetToLineColumn(
+        source,
+        entry.exportName.start ?? entry.localName.start ?? entry.importName.start ?? entry.start
+      );
+      const importKind = entry.importName.kind as string;
+      const exportKind = entry.exportName.kind as string;
+
+      if (importKind === "AllButDefault" && exportKind === "None") {
+        if (!targetFile) continue;
+        const nestedExports = await getModuleExports(targetFile, nextVisited);
+        for (const nested of nestedExports) {
+          if (nested.symbol === "default") continue;
+          const starExportKind: ModuleExportRecord["exportKind"] = entry.isType
+            ? "type"
+            : nested.exportKind;
+          upsertExport(exportMap, conflictingStarExports, {
+            ...nested,
+            line: exportLoc.line,
+            exportKind: starExportKind,
+            isTypeOnly: starExportKind === "type",
+            source: "star-re-export",
+            from: relPath(targetFile),
+          });
+        }
+        continue;
+      }
+
+      const symbol = exportSymbol(entry);
+      if (!symbol) continue;
+
+      const importedSymbol =
+        importKind === "Default"
+          ? "default"
+          : importKind === "Name"
+            ? entry.importName.name
+            : null;
+      const nestedMatch =
+        targetFile && importedSymbol
+          ? (await getModuleExports(targetFile, nextVisited)).find(
+              (item) => item.symbol === importedSymbol
+            ) ?? null
+          : null;
+
+      const lookupLoc = offsetToLineColumn(
+        source,
+        exportLookupOffset(entry)
+      );
+      const metadata = await resolveExportMetadata(
+        relFile,
+        lookupLoc.line,
+        lookupLoc.column,
+        importKind === "All" ? "namespace" : "alias"
+      );
+      const resolvedExportKind: ModuleExportRecord["exportKind"] =
+        entry.isType ||
+        nestedMatch?.exportKind === "type" ||
+        kindImpliesTypeOnly(nestedMatch?.kind ?? metadata.kind)
+          ? "type"
+          : "value";
+      const resolvedKind = normalizeExportKindLabel(
+        nestedMatch?.kind ?? metadata.kind,
+        resolvedExportKind
+      );
+
+      upsertExport(exportMap, conflictingStarExports, {
+        symbol,
+        kind: resolvedKind,
+        line: exportLoc.line,
+        type: nestedMatch?.type ?? metadata.type,
+        exportKind: resolvedExportKind,
+        isTypeOnly: resolvedExportKind === "type",
+        isNamespace: importKind === "All",
+        source: "re-export",
+        from: targetFile ? relPath(targetFile) : moduleRequest.value,
+        definedIn: nestedMatch?.definedIn ?? metadata.definedIn,
+        definedLine: nestedMatch?.definedLine ?? metadata.definedLine,
+      });
+      continue;
+    }
+
+    for (const entry of exp.entries) {
+      const moduleRequest = (entry as { moduleRequest?: { value: string } }).moduleRequest;
+      if (moduleRequest) continue;
+
+      const symbol = exportSymbol(entry);
+      if (!symbol) continue;
+
+      const exportLoc = offsetToLineColumn(
+        source,
+        entry.exportName.start ?? entry.localName.start ?? entry.start
+      );
+      const lookupLoc = offsetToLineColumn(source, exportLookupOffset(entry));
+      const metadata = await resolveExportMetadata(
+        relFile,
+        lookupLoc.line,
+        lookupLoc.column,
+        entry.isType ? "type" : "value"
+      );
+      const resolvedExportKind: ModuleExportRecord["exportKind"] =
+        entry.isType || kindImpliesTypeOnly(metadata.kind) ? "type" : "value";
+      const resolvedKind = normalizeExportKindLabel(metadata.kind, resolvedExportKind);
+
+      // Skip navbar/import alias noise — only keep actual exported declaration kinds.
+      if (
+        resolvedExportKind === "value" &&
+        symbol !== "default" &&
+        !exportKinds.has(resolvedKind) &&
+        resolvedKind !== "namespace" &&
+        resolvedKind !== "class"
+      ) {
+        continue;
+      }
+
+      upsertExport(exportMap, conflictingStarExports, {
+        symbol,
+        kind: resolvedKind,
+        line: exportLoc.line,
+        type: metadata.type,
+        exportKind: resolvedExportKind,
+        isTypeOnly: resolvedExportKind === "type",
+        isNamespace: false,
+        source: "local",
+        from: null,
+        definedIn: relFile,
+        definedLine: resolvedExportKind === "type" ? exportLoc.line : metadata.definedLine,
+      });
+    }
+  }
+
+  return [...exportMap.values()].sort(
+    (a, b) => a.line - b.line || a.symbol.localeCompare(b.symbol)
+  );
 }
 
 // ─── Tool 1: ts_find_symbol ─────────────────────────────────────────────────
@@ -499,68 +848,38 @@ mcpServer.tool(
 
 mcpServer.tool(
   "ts_module_exports",
-  "List all exported symbols from a module with their resolved types. Gives an at-a-glance understanding of what a file provides.",
+  "List all exported symbols from a module with their resolved types, including re-exports when possible. Gives an at-a-glance understanding of what a file provides.",
   {
     file: z.string().describe("File to inspect"),
   },
   async ({ file }) => {
-    const bar = await client.navbar(file);
-    if (bar.length === 0) {
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: JSON.stringify({ error: `No symbols found in ${file}` }),
-          },
-        ],
-      };
-    }
-
-    // The top-level navbar item is the module itself — its children are exports
-    const moduleItem = bar.find((item) => item.kind === "module");
-    const topItems = moduleItem?.childItems ?? bar;
-
-    // Filter to meaningful declarations (skip imports, local vars, etc.)
-    const exportKinds = new Set([
-      "function",
-      "const",
-      "class",
-      "interface",
-      "type",
-      "enum",
-      "var",
-      "let",
-      "method",
-    ]);
-    const candidates = topItems.filter((item) => exportKinds.has(item.kind));
-
-    const exports: Array<{
-      symbol: string;
-      kind: string;
-      line: number;
-      type: string | null;
-    }> = [];
-
-    for (const item of candidates) {
-      if (!item.spans[0]) continue;
-      const span = item.spans[0];
-
-      // Get type info for this symbol
-      const info = await client.quickinfo(file, span.start.line, span.start.offset);
-
-      exports.push({
-        symbol: item.text,
-        kind: item.kind,
-        line: span.start.line,
-        type: info?.displayString ?? null,
-      });
-    }
+    const exports = await getModuleExports(file);
+    const localCount = exports.filter((item) => item.source === "local").length;
+    const reExportCount = exports.length - localCount;
+    const typeOnlyCount = exports.filter((item) => item.isTypeOnly).length;
+    const valueCount = exports.length - typeOnlyCount;
+    const namespaceExportCount = exports.filter((item) => item.isNamespace).length;
+    const hasLocalRuntimeExports = exports.some(
+      (item) => item.source === "local" && !item.isTypeOnly
+    );
+    const isPrimarilyBarrel = exports.length > 0 && localCount < reExportCount;
 
     return {
       content: [
         {
           type: "text" as const,
-          text: JSON.stringify({ file, exports, count: exports.length }),
+          text: JSON.stringify({
+            file,
+            exports,
+            count: exports.length,
+            localCount,
+            reExportCount,
+            typeOnlyCount,
+            valueCount,
+            namespaceExportCount,
+            hasLocalRuntimeExports,
+            isPrimarilyBarrel,
+          }),
         },
       ],
     };
@@ -571,7 +890,7 @@ mcpServer.tool(
 
 /** Convert an absolute path to project-relative */
 function relPath(absPath: string): string {
-  return path.relative(projectRoot, absPath);
+  return path.relative(normalizedProjectRoot, normalizeExistingPath(absPath));
 }
 
 /** Convert a relative or absolute path to absolute */
@@ -812,6 +1131,7 @@ async function main() {
   ]);
 
   moduleGraph = graphResult.graph;
+  moduleResolver = graphResult.resolver;
   startWatcher(projectRoot, moduleGraph, graphResult.resolver);
 
   const transport = new StdioServerTransport();
