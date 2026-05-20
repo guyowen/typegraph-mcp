@@ -170,6 +170,64 @@ function hasTrustedCodexProject(projectRoot: string): boolean | null {
   return matchesTrustedProject();
 }
 
+function hasCompleteJsonTypegraphRegistration(
+  config: unknown,
+  serverName: string,
+  projectRoot: string
+): boolean {
+  if (typeof config !== "object" || config === null) return false;
+  const servers = (config as Record<string, unknown>)["mcpServers"];
+  if (typeof servers !== "object" || servers === null) return false;
+  const entry = (servers as Record<string, unknown>)[serverName];
+  if (typeof entry !== "object" || entry === null) return false;
+
+  const record = entry as Record<string, unknown>;
+  const command = record["command"];
+  const args = record["args"];
+  const env = record["env"];
+  const serializedArgs = JSON.stringify(args ?? []);
+
+  return (
+    typeof command === "string" &&
+    command.length > 0 &&
+    Array.isArray(args) &&
+    serializedArgs.includes("server.ts") &&
+    serializedArgs.includes("tsx") &&
+    typeof env === "object" &&
+    env !== null &&
+    (env as Record<string, unknown>)["TYPEGRAPH_PROJECT_ROOT"] === projectRoot &&
+    typeof (env as Record<string, unknown>)["TYPEGRAPH_TSCONFIG"] === "string"
+  );
+}
+
+function readJsonConfig(configPath: string): unknown | null {
+  if (!fs.existsSync(configPath)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(configPath, "utf-8"));
+  } catch {
+    return null;
+  }
+}
+
+function getAntigravityMcpConfigPaths(): string[] {
+  const home = process.env.HOME || "";
+  return [
+    path.join(home, ".gemini/antigravity/mcp_config.json"),
+    path.join(home, ".gemini/antigravity-cli/plugins/typegraph-mcp/mcp_config.json"),
+  ];
+}
+
+function findAntigravityRegistration(projectRoot: string): string | null {
+  const home = process.env.HOME || "";
+  for (const configPath of getAntigravityMcpConfigPaths()) {
+    const config = readJsonConfig(configPath);
+    if (hasCompleteJsonTypegraphRegistration(config, "typegraph-mcp", projectRoot)) {
+      return configPath.replace(home, "~");
+    }
+  }
+  return null;
+}
+
 function readProjectPackageJson(projectRoot: string): Record<string, unknown> | null {
   const packageJsonPath = path.resolve(projectRoot, "package.json");
   if (!fs.existsSync(packageJsonPath)) return null;
@@ -346,6 +404,7 @@ export async function main(configOverride?: TypegraphConfig): Promise<CheckResul
     encoding: "utf-8",
   });
   const hasGlobalCodexRegistration = codexGet.status === 0;
+  const antigravityRegistrationPath = findAntigravityRegistration(projectRoot);
   if (process.env.CLAUDE_PLUGIN_ROOT) {
     pass("MCP registered via plugin (CLAUDE_PLUGIN_ROOT set)");
   } else if (hasPluginMcp) {
@@ -382,6 +441,8 @@ export async function main(configOverride?: TypegraphConfig): Promise<CheckResul
     }
   } else if (hasGlobalCodexRegistration) {
     pass("MCP registered in global Codex CLI config");
+  } else if (antigravityRegistrationPath !== null) {
+    pass(`MCP registered in Antigravity config (${antigravityRegistrationPath})`);
   } else {
     const codexConfigPath = path.resolve(projectRoot, ".codex/config.toml");
     const mcpJsonPath = path.resolve(projectRoot, ".claude/mcp.json");

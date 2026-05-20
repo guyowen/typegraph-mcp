@@ -22,7 +22,7 @@ import { resolveConfig } from "./config.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-type AgentId = "claude-code" | "cursor" | "codex" | "gemini" | "copilot";
+type AgentId = "claude-code" | "cursor" | "codex" | "gemini" | "copilot" | "antigravity";
 
 interface AgentDef {
   name: string;
@@ -80,7 +80,7 @@ const CLAUDE_NODE_PLACEHOLDER = "__TYPEGRAPH_NODE__";
 
 const PLUGIN_DIR_NAME = "plugins/typegraph-mcp";
 
-const AGENT_IDS: AgentId[] = ["claude-code", "cursor", "codex", "gemini", "copilot"];
+const AGENT_IDS: AgentId[] = ["claude-code", "cursor", "codex", "gemini", "copilot", "antigravity"];
 
 const AGENTS: Record<AgentId, AgentDef> = {
   "claude-code": {
@@ -128,6 +128,13 @@ const AGENTS: Record<AgentId, AgentDef> = {
     needsAgentsSkills: true,
     detect: (root) =>
       fs.existsSync(path.join(root, ".github/copilot-instructions.md")),
+  },
+  antigravity: {
+    name: "Antigravity",
+    pluginFiles: [],
+    agentFile: "AGENTS.md",
+    needsAgentsSkills: true,
+    detect: (root) => fs.existsSync(path.join(root, ".gemini/antigravity")),
   },
 };
 
@@ -248,6 +255,35 @@ function getCodexMcpServerEntry(projectRoot: string): {
 
 function getCodexConfigPath(projectRoot: string): string {
   return path.resolve(projectRoot, ".codex/config.toml");
+}
+
+function getAntigravityMcpConfigPaths(): string[] {
+  const home = process.env.HOME || "";
+  return [
+    path.join(home, ".gemini/antigravity/mcp_config.json"),
+    path.join(home, ".gemini/antigravity-cli/plugins/typegraph-mcp/mcp_config.json"),
+  ];
+}
+
+function ensureAntigravityCliPlugin(): void {
+  const home = process.env.HOME || "";
+  const pluginDir = path.join(home, ".gemini/antigravity-cli/plugins/typegraph-mcp");
+  const pluginJsonPath = path.join(pluginDir, "plugin.json");
+  if (!fs.existsSync(pluginJsonPath)) {
+    fs.mkdirSync(pluginDir, { recursive: true });
+    fs.writeFileSync(
+      pluginJsonPath,
+      JSON.stringify(
+        {
+          name: "typegraph-mcp",
+          version: "1.0.0",
+          description: "TypeGraph MCP server for TypeScript navigation",
+        },
+        null,
+        2
+      ) + "\n"
+    );
+  }
 }
 
 function isTomlSectionGroup(sectionName: string | null, prefix: string): boolean {
@@ -476,6 +512,9 @@ function registerMcpServers(projectRoot: string, selectedAgents: AgentId[]): voi
   if (selectedAgents.includes("copilot")) {
     registerJsonMcp(projectRoot, ".vscode/mcp.json", "servers");
   }
+  if (selectedAgents.includes("antigravity")) {
+    registerAntigravityMcp(projectRoot);
+  }
 }
 
 /** Deregister the typegraph MCP server from all agent config files */
@@ -483,6 +522,7 @@ function deregisterMcpServers(projectRoot: string): void {
   deregisterJsonMcp(projectRoot, ".cursor/mcp.json", "mcpServers");
   deregisterCodexMcp(projectRoot);
   deregisterJsonMcp(projectRoot, ".vscode/mcp.json", "servers");
+  deregisterAntigravityMcp(projectRoot);
 }
 
 /** Register MCP server in a JSON config file (Cursor or Copilot format) */
@@ -589,6 +629,73 @@ function deregisterCodexMcp(projectRoot: string): void {
         fs.writeFileSync(fullPath, nextContent);
       }
       p.log.info(`${configPath}: removed typegraph MCP server`);
+    }
+  }
+}
+
+/** Register MCP server in Antigravity's config files */
+function registerAntigravityMcp(projectRoot: string): void {
+  const home = process.env.HOME || "";
+  const pluginDir = path.resolve(projectRoot, PLUGIN_DIR_NAME);
+  const tsConfigPath = path.resolve(projectRoot, "tsconfig.json");
+  ensureAntigravityCliPlugin();
+
+  const entry = {
+    command: process.execPath,
+    args: [
+      path.join(pluginDir, "node_modules/tsx/dist/cli.mjs"),
+      path.join(pluginDir, "server.ts"),
+    ],
+    env: {
+      TYPEGRAPH_PROJECT_ROOT: projectRoot,
+      TYPEGRAPH_TSCONFIG: tsConfigPath,
+    },
+  };
+
+  for (const configPath of getAntigravityMcpConfigPaths()) {
+    let config: any = { mcpServers: {} };
+    if (fs.existsSync(configPath)) {
+      try {
+        config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+      } catch {
+        p.log.warn(`Could not parse ~${configPath.replace(home, "")} — skipping MCP registration`);
+        continue;
+      }
+    }
+    if (!config.mcpServers) config.mcpServers = {};
+    config.mcpServers["typegraph-mcp"] = entry;
+
+    const dir = path.dirname(configPath);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n");
+    p.log.success(`~${configPath.replace(home, "")}: registered typegraph-mcp server`);
+  }
+}
+
+/** Deregister MCP server from Antigravity's config files */
+function deregisterAntigravityMcp(projectRoot: string): void {
+  const home = process.env.HOME || "";
+
+  for (const configPath of getAntigravityMcpConfigPaths()) {
+    if (!fs.existsSync(configPath)) continue;
+    try {
+      const config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+      if (config.mcpServers && config.mcpServers["typegraph-mcp"]) {
+        delete config.mcpServers["typegraph-mcp"];
+        if (Object.keys(config.mcpServers).length === 0) {
+          delete config.mcpServers;
+        }
+        if (Object.keys(config).length === 0) {
+          fs.unlinkSync(configPath);
+        } else {
+          fs.writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n");
+        }
+        p.log.info(`~${configPath.replace(home, "")}: removed typegraph-mcp server`);
+      }
+    } catch {
+      // Ignore
     }
   }
 }
@@ -876,7 +983,7 @@ async function setup(yes: boolean): Promise<void> {
   // 3. Agent selection
   const selectedAgents = await selectAgents(projectRoot, yes);
 
-  const needsPluginSkills = selectedAgents.includes("claude-code") || selectedAgents.includes("cursor");
+  const needsPluginSkills = selectedAgents.includes("claude-code") || selectedAgents.includes("cursor") || selectedAgents.includes("antigravity");
   const needsAgentsSkills = selectedAgents.some((id) => AGENTS[id].needsAgentsSkills);
 
   p.log.step(`Installing to ${PLUGIN_DIR_NAME}/...`);

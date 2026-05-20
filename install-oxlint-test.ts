@@ -22,13 +22,14 @@ function copyDir(src: string, dest: string): void {
 function runTsx(
   toolRoot: string,
   args: string[],
-  cwd: string
+  cwd: string,
+  env: NodeJS.ProcessEnv = process.env
 ): string {
   return execFileSync(path.join(toolRoot, "node_modules/.bin/tsx"), args, {
     cwd,
     encoding: "utf-8",
     maxBuffer: 10 * 1024 * 1024,
-    env: process.env,
+    env,
   });
 }
 
@@ -44,6 +45,7 @@ async function main(): Promise<void> {
   const fixtureRoot = path.join(repoRoot, ".fixtures/install-oxlint");
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "typegraph-install-oxlint-"));
   const projectRoot = path.join(tempRoot, "project");
+  const homeRoot = path.join(tempRoot, "home");
 
   copyDir(fixtureRoot, projectRoot);
   fs.mkdirSync(path.join(projectRoot, "node_modules"), { recursive: true });
@@ -54,7 +56,14 @@ async function main(): Promise<void> {
   );
 
   try {
-    const setupOutput = runTsx(repoRoot, [path.join(repoRoot, "cli.ts"), "setup", "--yes"], projectRoot);
+    fs.mkdirSync(homeRoot, { recursive: true });
+    const testEnv = { ...process.env, HOME: homeRoot };
+    const setupOutput = runTsx(
+      repoRoot,
+      [path.join(repoRoot, "cli.ts"), "setup", "--yes"],
+      projectRoot,
+      testEnv
+    );
     const pluginRoot = path.join(projectRoot, "plugins/typegraph-mcp");
 
     const tsconfig = fs.readFileSync(path.join(projectRoot, "tsconfig.json"), "utf-8");
@@ -70,7 +79,12 @@ async function main(): Promise<void> {
     assertIncludes(setupOutput, 'Added "plugins/**" to .oxlintrc.json ignorePatterns');
     assertIncludes(setupOutput, "Oxlint ignores plugins/ (.oxlintrc.json)");
 
-    const checkOutput = runTsx(pluginRoot, [path.join(pluginRoot, "cli.ts"), "check"], projectRoot);
+    const checkOutput = runTsx(
+      pluginRoot,
+      [path.join(pluginRoot, "cli.ts"), "check"],
+      projectRoot,
+      testEnv
+    );
     assertIncludes(checkOutput, "Oxlint ignores plugins/ (.oxlintrc.json)");
     assert.ok(
       !checkOutput.includes("Lint config check (no ESLint or Oxlint config found)"),
