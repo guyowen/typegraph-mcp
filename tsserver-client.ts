@@ -67,7 +67,8 @@ export interface NavBarItem {
 
 // ─── Logging ─────────────────────────────────────────────────────────────────
 
-const log = (...args: unknown[]) => console.error("[typegraph/tsserver]", ...args);
+const log = (...args: unknown[]) =>
+  console.error("[typegraph/tsserver]", ...args);
 
 // ─── TsServerClient ─────────────────────────────────────────────────────────
 
@@ -91,10 +92,16 @@ export class TsServerClient {
   private restartCount = 0;
   private readonly maxRestarts = 3;
 
+  /** Delay in ms after open notification before sending queries (default: 50) */
+  private readonly openFileDelayMs: number;
+
   constructor(
     private readonly projectRoot: string,
-    private readonly tsconfigPath: string = "./tsconfig.json"
-  ) {}
+    private readonly tsconfigPath: string = "./tsconfig.json",
+    options?: { openFileDelayMs?: number },
+  ) {
+    this.openFileDelayMs = options?.openFileDelayMs ?? 50;
+  }
 
   // ─── Path Resolution ────────────────────────────────────────────────────
 
@@ -124,18 +131,24 @@ export class TsServerClient {
     if (this.child) return;
 
     // Resolve tsserver from the TARGET project's node_modules, not the MCP server's
-    const require = createRequire(path.resolve(this.projectRoot, "package.json"));
+    const require = createRequire(
+      path.resolve(this.projectRoot, "package.json"),
+    );
     const tsserverPath = require.resolve("typescript/lib/tsserver.js");
 
     log(`Spawning tsserver: ${tsserverPath}`);
     log(`Project root: ${this.projectRoot}`);
     log(`tsconfig: ${this.tsconfigPath}`);
 
-    this.child = spawn("node", [tsserverPath, "--disableAutomaticTypingAcquisition"], {
-      cwd: this.projectRoot,
-      stdio: ["pipe", "pipe", "pipe"],
-      env: { ...process.env, TSS_LOG: undefined },
-    });
+    this.child = spawn(
+      "node",
+      [tsserverPath, "--disableAutomaticTypingAcquisition"],
+      {
+        cwd: this.projectRoot,
+        stdio: ["pipe", "pipe", "pipe"],
+        env: { ...process.env, TSS_LOG: undefined },
+      },
+    );
 
     this.child.stdout!.on("data", (chunk: Buffer) => this.onData(chunk));
     this.child.stderr!.on("data", (chunk: Buffer) => {
@@ -240,7 +253,10 @@ export class TsServerClient {
         return; // Need more data for the body
       }
 
-      const bodyBytes = this.buffer.subarray(bodyStart, bodyStart + contentLength);
+      const bodyBytes = this.buffer.subarray(
+        bodyStart,
+        bodyStart + contentLength,
+      );
       this.buffer = this.buffer.subarray(bodyStart + contentLength);
 
       try {
@@ -269,7 +285,9 @@ export class TsServerClient {
           pending.resolve(message.body);
         } else {
           pending.reject(
-            new Error(`tsserver ${pending.command} failed: ${message.message ?? "unknown error"}`)
+            new Error(
+              `tsserver ${pending.command} failed: ${message.message ?? "unknown error"}`,
+            ),
           );
         }
       }
@@ -295,7 +313,11 @@ export class TsServerClient {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(seq);
-        reject(new Error(`tsserver ${command} timed out after ${REQUEST_TIMEOUT_MS}ms`));
+        reject(
+          new Error(
+            `tsserver ${command} timed out after ${REQUEST_TIMEOUT_MS}ms`,
+          ),
+        );
       }, REQUEST_TIMEOUT_MS);
 
       this.pending.set(seq, { resolve, reject, timer, command });
@@ -319,8 +341,10 @@ export class TsServerClient {
     this.openFiles.add(absPath);
     // `open` is fire-and-forget — tsserver doesn't reliably respond
     this.sendNotification("open", { file: absPath });
-    // Small delay to let tsserver process the open before we query
-    await new Promise((r) => setTimeout(r, 50));
+    // Only wait on first open to let tsserver initialize; subsequent opens are immediate
+    if (this.openFiles.size === 1) {
+      await new Promise((r) => setTimeout(r, this.openFileDelayMs));
+    }
   }
 
   async reloadOpenFile(file: string): Promise<boolean> {
@@ -342,7 +366,11 @@ export class TsServerClient {
 
   // ─── Public API ────────────────────────────────────────────────────────
 
-  async definition(file: string, line: number, offset: number): Promise<DefinitionResult[]> {
+  async definition(
+    file: string,
+    line: number,
+    offset: number,
+  ): Promise<DefinitionResult[]> {
     const absPath = this.resolvePath(file);
     await this.ensureOpen(absPath);
 
@@ -360,7 +388,11 @@ export class TsServerClient {
     }));
   }
 
-  async references(file: string, line: number, offset: number): Promise<ReferenceEntry[]> {
+  async references(
+    file: string,
+    line: number,
+    offset: number,
+  ): Promise<ReferenceEntry[]> {
     const absPath = this.resolvePath(file);
     await this.ensureOpen(absPath);
 
@@ -378,7 +410,11 @@ export class TsServerClient {
     }));
   }
 
-  async quickinfo(file: string, line: number, offset: number): Promise<QuickInfoResult | null> {
+  async quickinfo(
+    file: string,
+    line: number,
+    offset: number,
+  ): Promise<QuickInfoResult | null> {
     const absPath = this.resolvePath(file);
     await this.ensureOpen(absPath);
 
@@ -397,7 +433,11 @@ export class TsServerClient {
     }
   }
 
-  async navto(searchValue: string, maxResults = 10, file?: string): Promise<NavToItem[]> {
+  async navto(
+    searchValue: string,
+    maxResults = 10,
+    file?: string,
+  ): Promise<NavToItem[]> {
     // If a file is specified, open it first so tsserver knows about it
     if (file) await this.ensureOpen(file);
 
@@ -407,7 +447,9 @@ export class TsServerClient {
     };
     if (file) args["file"] = this.resolvePath(file);
 
-    const body = (await this.sendRequest("navto", args)) as NavToItem[] | undefined;
+    const body = (await this.sendRequest("navto", args)) as
+      | NavToItem[]
+      | undefined;
 
     if (!body || !Array.isArray(body)) return [];
 

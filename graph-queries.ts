@@ -11,7 +11,10 @@ import * as path from "node:path";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function shouldIncludeEdge(edge: ImportEdge, includeTypeOnly: boolean): boolean {
+function shouldIncludeEdge(
+  edge: ImportEdge,
+  includeTypeOnly: boolean,
+): boolean {
   if (!includeTypeOnly && edge.isTypeOnly) return false;
   return true;
 }
@@ -36,7 +39,7 @@ export interface DepTreeResult {
 export function dependencyTree(
   graph: ModuleGraph,
   file: string,
-  opts: DepTreeOpts = {}
+  opts: DepTreeOpts = {},
 ): DepTreeResult {
   const { depth = Infinity, includeTypeOnly = false } = opts;
   const visited = new Set<string>();
@@ -84,6 +87,11 @@ export interface DependentsResult {
 /** Cache for package.json lookups — maps directory to package name */
 const packageNameCache = new Map<string, string>();
 
+/** Clear the package name cache (call when graph is rebuilt) */
+export function clearPackageNameCache(): void {
+  packageNameCache.clear();
+}
+
 function findPackageName(filePath: string): string {
   let dir = path.dirname(filePath);
   while (dir !== path.dirname(dir)) {
@@ -111,7 +119,7 @@ function findPackageName(filePath: string): string {
 export function dependents(
   graph: ModuleGraph,
   file: string,
-  opts: DependentsOpts = {}
+  opts: DependentsOpts = {},
 ): DependentsResult {
   const { depth = Infinity, includeTypeOnly = false } = opts;
   const visited = new Set<string>();
@@ -147,7 +155,13 @@ export function dependents(
     byPackage[pkgName]!.push(f);
   }
 
-  return { root: file, nodes: result.length, directCount, files: result, byPackage };
+  return {
+    root: file,
+    nodes: result.length,
+    directCount,
+    files: result,
+    byPackage,
+  };
 }
 
 // ─── 3. importCycles ────────────────────────────────────────────────────────
@@ -168,7 +182,7 @@ export interface CycleResult {
  */
 export function importCycles(
   graph: ModuleGraph,
-  opts: CycleOpts = {}
+  opts: CycleOpts = {},
 ): CycleResult {
   const { file, package: pkgDir } = opts;
 
@@ -227,9 +241,7 @@ export function importCycles(
   }
   if (pkgDir) {
     const absPkgDir = path.resolve(pkgDir);
-    cycles = cycles.filter((scc) =>
-      scc.every((f) => f.startsWith(absPkgDir))
-    );
+    cycles = cycles.filter((scc) => scc.every((f) => f.startsWith(absPkgDir)));
   }
 
   return { count: cycles.length, cycles };
@@ -255,7 +267,7 @@ export function shortestPath(
   graph: ModuleGraph,
   from: string,
   to: string,
-  opts: PathOpts = {}
+  opts: PathOpts = {},
 ): PathResult {
   const { includeTypeOnly = false } = opts;
 
@@ -334,7 +346,7 @@ export interface SubgraphResult {
 export function subgraph(
   graph: ModuleGraph,
   files: string[],
-  opts: SubgraphOpts = {}
+  opts: SubgraphOpts = {},
 ): SubgraphResult {
   const { depth = 1, direction = "both" } = opts;
   const visited = new Set<string>(files);
@@ -379,7 +391,11 @@ export function subgraph(
     }
   }
 
-  return { nodes, edges, stats: { nodeCount: nodes.length, edgeCount: edges.length } };
+  return {
+    nodes,
+    edges,
+    stats: { nodeCount: nodes.length, edgeCount: edges.length },
+  };
 }
 
 // ─── 6. moduleBoundary ──────────────────────────────────────────────────────
@@ -398,7 +414,7 @@ export interface BoundaryResult {
  */
 export function moduleBoundary(
   graph: ModuleGraph,
-  files: string[]
+  files: string[],
 ): BoundaryResult {
   const fileSet = new Set(files);
 

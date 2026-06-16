@@ -17,7 +17,6 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { parseSync } from "oxc-parser";
 import type { ResolverFactory } from "oxc-resolver";
 import { z } from "zod";
 import { TsServerClient, type NavBarItem } from "./tsserver-client.js";
@@ -35,6 +34,11 @@ import {
   subgraph,
   moduleBoundary,
 } from "./graph-queries.js";
+import {
+  getModuleExports,
+  EXPORT_KINDS,
+  type ModuleExportRecord,
+} from "./export-resolver.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { resolveConfig } from "./config.js";
@@ -61,11 +65,29 @@ const mcpServer = new McpServer({
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /** Read a preview line from a file at a 1-based line number */
+const previewCache = new Map<string, { lines: string[]; mtime: number }>();
+const PREVIEW_CACHE_MAX = 500;
+
 function readPreview(file: string, line: number): string {
   try {
     const absPath = client.resolvePath(file);
+    const stat = fs.statSync(absPath);
+    const cached = previewCache.get(absPath);
+
+    if (cached && cached.mtime === stat.mtimeMs) {
+      return cached.lines[line - 1]?.trim() ?? "";
+    }
+
     const content = fs.readFileSync(absPath, "utf-8");
-    return content.split("\n")[line - 1]?.trim() ?? "";
+    const lines = content.split("\n");
+
+    if (previewCache.size >= PREVIEW_CACHE_MAX) {
+      const firstKey = previewCache.keys().next().value;
+      if (firstKey) previewCache.delete(firstKey);
+    }
+    previewCache.set(absPath, { lines, mtime: stat.mtimeMs });
+
+    return lines[line - 1]?.trim() ?? "";
   } catch {
     return "";
   }
@@ -74,12 +96,16 @@ function readPreview(file: string, line: number): string {
 /** Search a navbar tree recursively for a symbol by name */
 function findInNavBar(
   items: NavBarItem[],
-  symbol: string
+  symbol: string,
 ): { line: number; offset: number; kind: string } | null {
   for (const item of items) {
     if (item.text === symbol && item.spans.length > 0) {
       const span = item.spans[0]!;
-      return { line: span.start.line, offset: span.start.offset, kind: item.kind };
+      return {
+        line: span.start.line,
+        offset: span.start.offset,
+        kind: item.kind,
+      };
     }
     if (item.childItems?.length > 0) {
       const found = findInNavBar(item.childItems, symbol);
@@ -92,7 +118,7 @@ function findInNavBar(
 /** Resolve symbol to coordinates: try navbar first, fall back to navto */
 async function resolveSymbol(
   file: string,
-  symbol: string
+  symbol: string,
 ): Promise<{
   file: string;
   line: number;
@@ -152,7 +178,10 @@ const locationOrSymbol = {
     .positive()
     .optional()
     .describe("Column/offset (1-based). Required if symbol is not provided."),
-  symbol: z.string().optional().describe("Symbol name to find. Alternative to line+column."),
+  symbol: z
+    .string()
+    .optional()
+    .describe("Symbol name to find. Alternative to line+column."),
 };
 
 /** Resolve params to coordinates: use line+column if provided, else find symbol */
@@ -161,7 +190,9 @@ async function resolveParams(params: {
   line?: number;
   column?: number;
   symbol?: string;
-}): Promise<{ file: string; line: number; column: number } | { error: string }> {
+}): Promise<
+  { file: string; line: number; column: number } | { error: string }
+> {
   if (params.line !== undefined && params.column !== undefined) {
     return { file: params.file, line: params.line, column: params.column };
   }
@@ -170,119 +201,13 @@ async function resolveParams(params: {
     if (!resolved) {
       return { error: `Symbol "${params.symbol}" not found in ${params.file}` };
     }
-    return { file: resolved.file, line: resolved.line, column: resolved.column };
+    return {
+      file: resolved.file,
+      line: resolved.line,
+      column: resolved.column,
+    };
   }
   return { error: "Either line+column or symbol must be provided" };
-}
-
-type ModuleExportRecord = {
-  symbol: string;
-  kind: string;
-  line: number;
-  type: string | null;
-  exportKind: "value" | "type";
-  isTypeOnly: boolean;
-  isNamespace: boolean;
-  source: "local" | "re-export" | "star-re-export";
-  from: string | null;
-  definedIn: string;
-  definedLine: number | null;
-};
-
-type StaticExportEntry = ReturnType<typeof parseSync>["module"]["staticExports"][number]["entries"][number];
-
-const exportKinds = new Set([
-  "function",
-  "const",
-  "class",
-  "interface",
-  "type",
-  "enum",
-  "var",
-  "let",
-  "method",
-]);
-
-function exportPriority(source: ModuleExportRecord["source"]): number {
-  switch (source) {
-    case "local":
-      return 3;
-    case "re-export":
-      return 2;
-    case "star-re-export":
-      return 1;
-  }
-}
-
-function exportKey(item: Pick<ModuleExportRecord, "symbol" | "exportKind">): string {
-  return `${item.symbol}:${item.exportKind}`;
-}
-
-function sameExportOrigin(a: ModuleExportRecord, b: ModuleExportRecord): boolean {
-  return (
-    a.symbol === b.symbol &&
-    a.exportKind === b.exportKind &&
-    a.from === b.from &&
-    a.definedIn === b.definedIn &&
-    a.definedLine === b.definedLine
-  );
-}
-
-function kindImpliesTypeOnly(kind: string): boolean {
-  return kind === "type" || kind === "interface";
-}
-
-function normalizeExportKindLabel(
-  kind: string,
-  exportKind: ModuleExportRecord["exportKind"]
-): string {
-  if (exportKind === "type" && !kindImpliesTypeOnly(kind)) {
-    return "type";
-  }
-  return kind;
-}
-
-function upsertExport(
-  map: Map<string, ModuleExportRecord>,
-  conflicts: Set<string>,
-  nextExport: ModuleExportRecord
-): void {
-  const key = exportKey(nextExport);
-  if (conflicts.has(key)) {
-    if (nextExport.source === "star-re-export") return;
-    conflicts.delete(key);
-    map.set(key, nextExport);
-    return;
-  }
-
-  const existing = map.get(key);
-  if (
-    existing &&
-    existing.source === "star-re-export" &&
-    nextExport.source === "star-re-export" &&
-    !sameExportOrigin(existing, nextExport)
-  ) {
-    map.delete(key);
-    conflicts.add(key);
-    return;
-  }
-
-  if (!existing || exportPriority(nextExport.source) > exportPriority(existing.source)) {
-    map.set(key, nextExport);
-  }
-}
-
-function offsetToLineColumn(source: string, offset: number | null | undefined): {
-  line: number;
-  column: number;
-} {
-  const safeOffset = Math.max(0, Math.min(offset ?? 0, source.length));
-  const prefix = source.slice(0, safeOffset);
-  const lines = prefix.split("\n");
-  return {
-    line: lines.length,
-    column: (lines.at(-1)?.length ?? 0) + 1,
-  };
 }
 
 function normalizeExistingPath(filePath: string): string {
@@ -295,226 +220,6 @@ function normalizeExistingPath(filePath: string): string {
 }
 
 const normalizedProjectRoot = normalizeExistingPath(projectRoot);
-
-function projectPath(file: string): string {
-  return path.isAbsolute(file) ? relPath(file) : file;
-}
-
-function exportSymbol(entry: StaticExportEntry): string | null {
-  if (entry.exportName.kind === "Default") return "default";
-  return entry.exportName.name ?? entry.localName.name ?? entry.importName.name;
-}
-
-function exportLookupOffset(entry: StaticExportEntry): number | null | undefined {
-  if ((entry as { moduleRequest?: { value: string } }).moduleRequest) {
-    return entry.importName.start ?? entry.exportName.start ?? entry.start;
-  }
-  if (entry.exportName.kind === "Default") {
-    return entry.localName.start ?? entry.exportName.start ?? entry.start;
-  }
-  return entry.exportName.start ?? entry.localName.start ?? entry.start;
-}
-
-async function resolveExportMetadata(
-  file: string,
-  line: number,
-  column: number,
-  fallbackKind: string
-): Promise<{
-  kind: string;
-  type: string | null;
-  definedIn: string;
-  definedLine: number | null;
-}> {
-  const defs = await client.definition(file, line, column);
-  const def = defs[0] ?? null;
-
-  let info = await client.quickinfo(file, line, column);
-  if ((!info || info.kind === "alias") && def) {
-    info = (await client.quickinfo(def.file, def.start.line, def.start.offset)) ?? info;
-  }
-
-  return {
-    kind: info?.kind ?? fallbackKind,
-    type: info?.displayString ?? null,
-    definedIn: projectPath(def?.file ?? file),
-    definedLine: def?.start.line ?? null,
-  };
-}
-
-async function getModuleExports(
-  file: string,
-  visited = new Set<string>()
-): Promise<ModuleExportRecord[]> {
-  const relFile = path.isAbsolute(file) ? relPath(file) : file;
-  const absFile = normalizeExistingPath(client.resolvePath(relFile));
-  if (visited.has(absFile)) return [];
-
-  const nextVisited = new Set(visited);
-  nextVisited.add(absFile);
-
-  const exportMap = new Map<string, ModuleExportRecord>();
-  const conflictingStarExports = new Set<string>();
-
-  let source: string;
-  try {
-    source = fs.readFileSync(absFile, "utf-8");
-  } catch {
-    return [...exportMap.values()];
-  }
-
-  let parsed: ReturnType<typeof parseSync>;
-  try {
-    parsed = parseSync(absFile, source);
-  } catch {
-    return [...exportMap.values()];
-  }
-
-  for (const exp of parsed.module.staticExports) {
-    for (const entry of exp.entries) {
-      const moduleRequest = (entry as { moduleRequest?: { value: string } }).moduleRequest;
-      if (!moduleRequest) continue;
-
-      const targetFile = resolveProjectImport(
-        moduleResolver,
-        path.dirname(absFile),
-        moduleRequest.value,
-        projectRoot
-      );
-
-      const exportLoc = offsetToLineColumn(
-        source,
-        entry.exportName.start ?? entry.localName.start ?? entry.importName.start ?? entry.start
-      );
-      const importKind = entry.importName.kind as string;
-      const exportKind = entry.exportName.kind as string;
-
-      if (importKind === "AllButDefault" && exportKind === "None") {
-        if (!targetFile) continue;
-        const nestedExports = await getModuleExports(targetFile, nextVisited);
-        for (const nested of nestedExports) {
-          if (nested.symbol === "default") continue;
-          const starExportKind: ModuleExportRecord["exportKind"] = entry.isType
-            ? "type"
-            : nested.exportKind;
-          upsertExport(exportMap, conflictingStarExports, {
-            ...nested,
-            line: exportLoc.line,
-            exportKind: starExportKind,
-            isTypeOnly: starExportKind === "type",
-            source: "star-re-export",
-            from: relPath(targetFile),
-          });
-        }
-        continue;
-      }
-
-      const symbol = exportSymbol(entry);
-      if (!symbol) continue;
-
-      const importedSymbol =
-        importKind === "Default"
-          ? "default"
-          : importKind === "Name"
-            ? entry.importName.name
-            : null;
-      const nestedMatch =
-        targetFile && importedSymbol
-          ? (await getModuleExports(targetFile, nextVisited)).find(
-              (item) => item.symbol === importedSymbol
-            ) ?? null
-          : null;
-
-      const lookupLoc = offsetToLineColumn(
-        source,
-        exportLookupOffset(entry)
-      );
-      const metadata = await resolveExportMetadata(
-        relFile,
-        lookupLoc.line,
-        lookupLoc.column,
-        importKind === "All" ? "namespace" : "alias"
-      );
-      const resolvedExportKind: ModuleExportRecord["exportKind"] =
-        entry.isType ||
-        nestedMatch?.exportKind === "type" ||
-        kindImpliesTypeOnly(nestedMatch?.kind ?? metadata.kind)
-          ? "type"
-          : "value";
-      const resolvedKind = normalizeExportKindLabel(
-        nestedMatch?.kind ?? metadata.kind,
-        resolvedExportKind
-      );
-
-      upsertExport(exportMap, conflictingStarExports, {
-        symbol,
-        kind: resolvedKind,
-        line: exportLoc.line,
-        type: nestedMatch?.type ?? metadata.type,
-        exportKind: resolvedExportKind,
-        isTypeOnly: resolvedExportKind === "type",
-        isNamespace: importKind === "All",
-        source: "re-export",
-        from: targetFile ? relPath(targetFile) : moduleRequest.value,
-        definedIn: nestedMatch?.definedIn ?? metadata.definedIn,
-        definedLine: nestedMatch?.definedLine ?? metadata.definedLine,
-      });
-      continue;
-    }
-
-    for (const entry of exp.entries) {
-      const moduleRequest = (entry as { moduleRequest?: { value: string } }).moduleRequest;
-      if (moduleRequest) continue;
-
-      const symbol = exportSymbol(entry);
-      if (!symbol) continue;
-
-      const exportLoc = offsetToLineColumn(
-        source,
-        entry.exportName.start ?? entry.localName.start ?? entry.start
-      );
-      const lookupLoc = offsetToLineColumn(source, exportLookupOffset(entry));
-      const metadata = await resolveExportMetadata(
-        relFile,
-        lookupLoc.line,
-        lookupLoc.column,
-        entry.isType ? "type" : "value"
-      );
-      const resolvedExportKind: ModuleExportRecord["exportKind"] =
-        entry.isType || kindImpliesTypeOnly(metadata.kind) ? "type" : "value";
-      const resolvedKind = normalizeExportKindLabel(metadata.kind, resolvedExportKind);
-
-      // Skip navbar/import alias noise — only keep actual exported declaration kinds.
-      if (
-        resolvedExportKind === "value" &&
-        symbol !== "default" &&
-        !exportKinds.has(resolvedKind) &&
-        resolvedKind !== "namespace" &&
-        resolvedKind !== "class"
-      ) {
-        continue;
-      }
-
-      upsertExport(exportMap, conflictingStarExports, {
-        symbol,
-        kind: resolvedKind,
-        line: exportLoc.line,
-        type: metadata.type,
-        exportKind: resolvedExportKind,
-        isTypeOnly: resolvedExportKind === "type",
-        isNamespace: false,
-        source: "local",
-        from: null,
-        definedIn: relFile,
-        definedLine: resolvedExportKind === "type" ? exportLoc.line : metadata.definedLine,
-      });
-    }
-  }
-
-  return [...exportMap.values()].sort(
-    (a, b) => a.line - b.line || a.symbol.localeCompare(b.symbol)
-  );
-}
 
 // ─── Tool 1: ts_find_symbol ─────────────────────────────────────────────────
 
@@ -532,7 +237,9 @@ mcpServer.tool(
         content: [
           {
             type: "text" as const,
-            text: JSON.stringify({ error: `Symbol "${symbol}" not found in ${file}` }),
+            text: JSON.stringify({
+              error: `Symbol "${symbol}" not found in ${file}`,
+            }),
           },
         ],
       };
@@ -540,7 +247,7 @@ mcpServer.tool(
     return {
       content: [{ type: "text" as const, text: JSON.stringify(result) }],
     };
-  }
+  },
 );
 
 // ─── Tool 2: ts_definition ──────────────────────────────────────────────────
@@ -552,7 +259,9 @@ mcpServer.tool(
   async (params) => {
     const loc = await resolveParams(params);
     if ("error" in loc) {
-      return { content: [{ type: "text" as const, text: JSON.stringify(loc) }] };
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(loc) }],
+      };
     }
 
     const defs = await client.definition(loc.file, loc.line, loc.column);
@@ -561,7 +270,10 @@ mcpServer.tool(
         content: [
           {
             type: "text" as const,
-            text: JSON.stringify({ definitions: [], source: readPreview(loc.file, loc.line) }),
+            text: JSON.stringify({
+              definitions: [],
+              source: readPreview(loc.file, loc.line),
+            }),
           },
         ],
       };
@@ -575,9 +287,14 @@ mcpServer.tool(
     }));
 
     return {
-      content: [{ type: "text" as const, text: JSON.stringify({ definitions: results }) }],
+      content: [
+        {
+          type: "text" as const,
+          text: JSON.stringify({ definitions: results }),
+        },
+      ],
     };
-  }
+  },
 );
 
 // ─── Tool 3: ts_references ──────────────────────────────────────────────────
@@ -589,7 +306,9 @@ mcpServer.tool(
   async (params) => {
     const loc = await resolveParams(params);
     if ("error" in loc) {
-      return { content: [{ type: "text" as const, text: JSON.stringify(loc) }] };
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(loc) }],
+      };
     }
 
     const refs = await client.references(loc.file, loc.line, loc.column);
@@ -609,7 +328,7 @@ mcpServer.tool(
         },
       ],
     };
-  }
+  },
 );
 
 // ─── Tool 4: ts_type_info ───────────────────────────────────────────────────
@@ -621,7 +340,9 @@ mcpServer.tool(
   async (params) => {
     const loc = await resolveParams(params);
     if ("error" in loc) {
-      return { content: [{ type: "text" as const, text: JSON.stringify(loc) }] };
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(loc) }],
+      };
     }
 
     const info = await client.quickinfo(loc.file, loc.line, loc.column);
@@ -652,7 +373,7 @@ mcpServer.tool(
         },
       ],
     };
-  }
+  },
 );
 
 // ─── Tool 5: ts_navigate_to ─────────────────────────────────────────────────
@@ -666,7 +387,7 @@ mcpServer.tool(
       .string()
       .optional()
       .describe(
-        "Optional file to also search via navbar (covers object literal keys not indexed by navto)"
+        "Optional file to also search via navbar (covers object literal keys not indexed by navto)",
       ),
     maxResults: z
       .number()
@@ -694,7 +415,7 @@ mcpServer.tool(
       const navbarHit = await resolveSymbol(file, symbol);
       if (navbarHit) {
         const alreadyFound = results.some(
-          (r) => r.file === navbarHit.file && r.line === navbarHit.line
+          (r) => r.file === navbarHit.file && r.line === navbarHit.line,
         );
         if (!alreadyFound) {
           results.unshift({
@@ -717,7 +438,7 @@ mcpServer.tool(
         },
       ],
     };
-  }
+  },
 );
 
 // ─── Tool 6: ts_trace_chain ─────────────────────────────────────────────────
@@ -743,7 +464,9 @@ mcpServer.tool(
         content: [
           {
             type: "text" as const,
-            text: JSON.stringify({ error: `Symbol "${symbol}" not found in ${file}` }),
+            text: JSON.stringify({
+              error: `Symbol "${symbol}" not found in ${file}`,
+            }),
           },
         ],
       };
@@ -766,7 +489,11 @@ mcpServer.tool(
     let current = { file: start.file, line: start.line, offset: start.column };
 
     for (let i = 0; i < maxHops; i++) {
-      const defs = await client.definition(current.file, current.line, current.offset);
+      const defs = await client.definition(
+        current.file,
+        current.line,
+        current.offset,
+      );
       if (defs.length === 0) break;
 
       const def = defs[0]!;
@@ -783,7 +510,11 @@ mcpServer.tool(
         preview,
       });
 
-      current = { file: def.file, line: def.start.line, offset: def.start.offset };
+      current = {
+        file: def.file,
+        line: def.start.line,
+        offset: def.start.offset,
+      };
     }
 
     return {
@@ -794,7 +525,7 @@ mcpServer.tool(
         },
       ],
     };
-  }
+  },
 );
 
 // ─── Tool 7: ts_blast_radius ────────────────────────────────────────────────
@@ -813,7 +544,9 @@ mcpServer.tool(
         content: [
           {
             type: "text" as const,
-            text: JSON.stringify({ error: `Symbol "${symbol}" not found in ${file}` }),
+            text: JSON.stringify({
+              error: `Symbol "${symbol}" not found in ${file}`,
+            }),
           },
         ],
       };
@@ -841,7 +574,7 @@ mcpServer.tool(
         },
       ],
     };
-  }
+  },
 );
 
 // ─── Tool 8: ts_module_exports ──────────────────────────────────────────────
@@ -853,14 +586,24 @@ mcpServer.tool(
     file: z.string().describe("File to inspect"),
   },
   async ({ file }) => {
-    const exports = await getModuleExports(file);
+    const exports = await getModuleExports(
+      client,
+      moduleResolver,
+      projectRoot,
+      relPath,
+      (fromDir, specifier) =>
+        resolveProjectImport(moduleResolver, fromDir, specifier, projectRoot),
+      file,
+    );
     const localCount = exports.filter((item) => item.source === "local").length;
     const reExportCount = exports.length - localCount;
     const typeOnlyCount = exports.filter((item) => item.isTypeOnly).length;
     const valueCount = exports.length - typeOnlyCount;
-    const namespaceExportCount = exports.filter((item) => item.isNamespace).length;
+    const namespaceExportCount = exports.filter(
+      (item) => item.isNamespace,
+    ).length;
     const hasLocalRuntimeExports = exports.some(
-      (item) => item.source === "local" && !item.isTypeOnly
+      (item) => item.source === "local" && !item.isTypeOnly,
     );
     const isPrimarilyBarrel = exports.length > 0 && localCount < reExportCount;
 
@@ -883,7 +626,7 @@ mcpServer.tool(
         },
       ],
     };
-  }
+  },
 );
 
 // ─── Graph Tool Helpers ─────────────────────────────────────────────────────
@@ -918,7 +661,10 @@ mcpServer.tool(
       .describe("Include type-only imports (default: false)"),
   },
   async ({ file, depth, includeTypeOnly }) => {
-    const result = dependencyTree(moduleGraph, absPath(file), { depth, includeTypeOnly });
+    const result = dependencyTree(moduleGraph, absPath(file), {
+      depth,
+      includeTypeOnly,
+    });
     return {
       content: [
         {
@@ -931,7 +677,7 @@ mcpServer.tool(
         },
       ],
     };
-  }
+  },
 );
 
 // ─── Tool 10: ts_dependents ─────────────────────────────────────────────────
@@ -954,7 +700,10 @@ mcpServer.tool(
       .describe("Include type-only imports (default: false)"),
   },
   async ({ file, depth, includeTypeOnly }) => {
-    const result = dependents(moduleGraph, absPath(file), { depth, includeTypeOnly });
+    const result = dependents(moduleGraph, absPath(file), {
+      depth,
+      includeTypeOnly,
+    });
     const byPackageRel: Record<string, string[]> = {};
     for (const [pkg, files] of Object.entries(result.byPackage)) {
       byPackageRel[pkg] = files.map(relPath);
@@ -973,7 +722,7 @@ mcpServer.tool(
         },
       ],
     };
-  }
+  },
 );
 
 // ─── Tool 11: ts_import_cycles ──────────────────────────────────────────────
@@ -982,8 +731,14 @@ mcpServer.tool(
   "ts_import_cycles",
   "Detect circular import dependencies in the project. Returns strongly connected components (cycles) in the import graph.",
   {
-    file: z.string().optional().describe("Filter to cycles containing this file"),
-    package: z.string().optional().describe("Filter to cycles within this directory"),
+    file: z
+      .string()
+      .optional()
+      .describe("Filter to cycles containing this file"),
+    package: z
+      .string()
+      .optional()
+      .describe("Filter to cycles within this directory"),
   },
   async ({ file, package: pkg }) => {
     const result = importCycles(moduleGraph, {
@@ -1001,7 +756,7 @@ mcpServer.tool(
         },
       ],
     };
-  }
+  },
 );
 
 // ─── Tool 12: ts_shortest_path ──────────────────────────────────────────────
@@ -1019,7 +774,9 @@ mcpServer.tool(
       .describe("Include type-only imports (default: false)"),
   },
   async ({ from, to, includeTypeOnly }) => {
-    const result = shortestPath(moduleGraph, absPath(from), absPath(to), { includeTypeOnly });
+    const result = shortestPath(moduleGraph, absPath(from), absPath(to), {
+      includeTypeOnly,
+    });
     return {
       content: [
         {
@@ -1035,7 +792,7 @@ mcpServer.tool(
         },
       ],
     };
-  }
+  },
 );
 
 // ─── Tool 13: ts_subgraph ───────────────────────────────────────────────────
@@ -1044,7 +801,9 @@ mcpServer.tool(
   "ts_subgraph",
   "Extract a subgraph around seed files. Expands by depth hops in the specified direction (imports, dependents, or both).",
   {
-    files: z.array(z.string()).describe("Seed files to expand from (relative or absolute paths)"),
+    files: z
+      .array(z.string())
+      .describe("Seed files to expand from (relative or absolute paths)"),
     depth: z
       .number()
       .int()
@@ -1059,7 +818,10 @@ mcpServer.tool(
       .describe("Direction to expand (default: both)"),
   },
   async ({ files, depth, direction }) => {
-    const result = subgraph(moduleGraph, files.map(absPath), { depth, direction });
+    const result = subgraph(moduleGraph, files.map(absPath), {
+      depth,
+      direction,
+    });
     return {
       content: [
         {
@@ -1077,7 +839,7 @@ mcpServer.tool(
         },
       ],
     };
-  }
+  },
 );
 
 // ─── Tool 14: ts_module_boundary ────────────────────────────────────────────
@@ -1088,7 +850,9 @@ mcpServer.tool(
   {
     files: z
       .array(z.string())
-      .describe("Files defining the module boundary (relative or absolute paths)"),
+      .describe(
+        "Files defining the module boundary (relative or absolute paths)",
+      ),
   },
   async ({ files }) => {
     const result = moduleBoundary(moduleGraph, files.map(absPath));
@@ -1114,7 +878,7 @@ mcpServer.tool(
         },
       ],
     };
-  }
+  },
 );
 
 // ─── Start ───────────────────────────────────────────────────────────────────
@@ -1133,10 +897,11 @@ async function main() {
   moduleGraph = graphResult.graph;
   moduleResolver = graphResult.resolver;
   startWatcher(projectRoot, moduleGraph, graphResult.resolver, {
-    onFileUpdated: (filePath) =>
-      client.reloadOpenFile(filePath).catch((err) => {
+    onFileUpdated: async (filePath) => {
+      await client.reloadOpenFile(filePath).catch((err) => {
         log(`Failed to reload open file ${relPath(filePath)}:`, err);
-      }),
+      });
+    },
     onFileDeleted: (filePath) => {
       client.closeFile(filePath);
     },

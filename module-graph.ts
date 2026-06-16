@@ -25,6 +25,8 @@ export interface ModuleGraph {
   forward: Map<string, ImportEdge[]>; // file → its imports
   reverse: Map<string, ImportEdge[]>; // file → files that import it
   files: Set<string>; // all known source files
+  // Optimization: source → target → index mapping for O(1) reverse edge removal
+  reverseIndex: Map<string, Map<string, number>>;
 }
 
 export interface BuildGraphResult {
@@ -75,7 +77,12 @@ export function discoverFiles(rootDir: string): string[] {
       } else if (entry.isFile()) {
         const name = entry.name;
         if (SKIP_FILES.has(name)) continue;
-        if (name.endsWith(".d.ts") || name.endsWith(".d.mts") || name.endsWith(".d.cts")) continue;
+        if (
+          name.endsWith(".d.ts") ||
+          name.endsWith(".d.mts") ||
+          name.endsWith(".d.cts")
+        )
+          continue;
         const ext = path.extname(name);
         if (TS_EXTENSIONS.has(ext)) {
           files.push(path.join(dir, name));
@@ -112,7 +119,9 @@ function parseFileImports(filePath: string, source: string): RawImport[] {
       const name =
         kind === "Default"
           ? "default"
-          : kind === "All" || kind === "AllButDefault" || kind === "NamespaceObject"
+          : kind === "All" ||
+              kind === "AllButDefault" ||
+              kind === "NamespaceObject"
             ? "*"
             : (entry.importName.name ?? entry.localName.value);
       names.push(name);
@@ -121,9 +130,19 @@ function parseFileImports(filePath: string, source: string): RawImport[] {
 
     // If no entries (e.g. `import "./side-effect"`), it's a side-effect import
     if (names.length === 0) {
-      imports.push({ specifier, names: ["*"], isTypeOnly: false, isDynamic: false });
+      imports.push({
+        specifier,
+        names: ["*"],
+        isTypeOnly: false,
+        isDynamic: false,
+      });
     } else {
-      imports.push({ specifier, names, isTypeOnly: allTypeOnly, isDynamic: false });
+      imports.push({
+        specifier,
+        names,
+        isTypeOnly: allTypeOnly,
+        isDynamic: false,
+      });
     }
   }
 
@@ -131,23 +150,33 @@ function parseFileImports(filePath: string, source: string): RawImport[] {
   for (const exp of result.module.staticExports) {
     for (const entry of exp.entries) {
       // Only re-exports have moduleRequest on the entry
-      const moduleRequest = (entry as { moduleRequest?: { value: string } }).moduleRequest;
+      const moduleRequest = (entry as { moduleRequest?: { value: string } })
+        .moduleRequest;
       if (!moduleRequest) continue;
 
       const specifier = moduleRequest.value;
       const entryKind = entry.importName.kind as string;
       const name =
-        entryKind === "AllButDefault" || entryKind === "All" || entryKind === "NamespaceObject"
+        entryKind === "AllButDefault" ||
+        entryKind === "All" ||
+        entryKind === "NamespaceObject"
           ? "*"
           : (entry.importName.name ?? "*");
 
       // Group by specifier — multiple entries from same module
-      const existing = imports.find((i) => i.specifier === specifier && !i.isDynamic);
+      const existing = imports.find(
+        (i) => i.specifier === specifier && !i.isDynamic,
+      );
       if (existing) {
         if (!existing.names.includes(name)) existing.names.push(name);
       } else {
         // oxc-parser doesn't expose isType on export entries, default false
-        imports.push({ specifier, names: [name], isTypeOnly: false, isDynamic: false });
+        imports.push({
+          specifier,
+          names: [name],
+          isTypeOnly: false,
+          isDynamic: false,
+        });
       }
     }
   }
@@ -159,7 +188,12 @@ function parseFileImports(filePath: string, source: string): RawImport[] {
       // Only include string literals (starts with ' or ")
       if (sliced.startsWith("'") || sliced.startsWith('"')) {
         const specifier = sliced.slice(1, -1); // strip quotes
-        imports.push({ specifier, names: ["*"], isTypeOnly: false, isDynamic: true });
+        imports.push({
+          specifier,
+          names: ["*"],
+          isTypeOnly: false,
+          isDynamic: true,
+        });
       }
     }
   }
@@ -178,7 +212,13 @@ const SOURCE_EXTS = [".ts", ".tsx", ".mts", ".cts"];
  *   packages: rootDir="src", outDir="dist" → dist/X.js → src/X.ts
  *   apps:     rootDir=".", outDir="dist"   → dist/X.js → X.ts
  */
+const distSourceCache = new Map<string, string>();
+const DIST_SOURCE_CACHE_MAX = 1000;
+
 function distToSource(resolvedPath: string, projectRoot: string): string {
+  const cached = distSourceCache.get(resolvedPath);
+  if (cached) return cached;
+
   // Only remap paths within the project that contain /dist/
   if (!resolvedPath.startsWith(projectRoot)) return resolvedPath;
   const rel = path.relative(projectRoot, resolvedPath);
@@ -193,14 +233,33 @@ function distToSource(resolvedPath: string, projectRoot: string): string {
 
   // Strategy 1: packages pattern — dist/X → src/X
   for (const ext of SOURCE_EXTS) {
-    const candidate = path.resolve(projectRoot, prefix, "src", withoutExt + ext);
-    if (fs.existsSync(candidate)) return candidate;
+    const candidate = path.resolve(
+      projectRoot,
+      prefix,
+      "src",
+      withoutExt + ext,
+    );
+    if (fs.existsSync(candidate)) {
+      if (distSourceCache.size >= DIST_SOURCE_CACHE_MAX) {
+        const firstKey = distSourceCache.keys().next().value;
+        if (firstKey) distSourceCache.delete(firstKey);
+      }
+      distSourceCache.set(resolvedPath, candidate);
+      return candidate;
+    }
   }
 
   // Strategy 2: apps pattern — dist/X → X (rootDir is ".")
   for (const ext of SOURCE_EXTS) {
     const candidate = path.resolve(projectRoot, prefix, withoutExt + ext);
-    if (fs.existsSync(candidate)) return candidate;
+    if (fs.existsSync(candidate)) {
+      if (distSourceCache.size >= DIST_SOURCE_CACHE_MAX) {
+        const firstKey = distSourceCache.keys().next().value;
+        if (firstKey) distSourceCache.delete(firstKey);
+      }
+      distSourceCache.set(resolvedPath, candidate);
+      return candidate;
+    }
   }
 
   // Strategy 3: index file — dist/schemas/index.js → src/schemas/index.ts
@@ -209,7 +268,14 @@ function distToSource(resolvedPath: string, projectRoot: string): string {
     const dirPath = withoutExt.slice(0, -6);
     for (const ext of SOURCE_EXTS) {
       const candidate = path.resolve(projectRoot, prefix, "src", dirPath + ext);
-      if (fs.existsSync(candidate)) return candidate;
+      if (fs.existsSync(candidate)) {
+        if (distSourceCache.size >= DIST_SOURCE_CACHE_MAX) {
+          const firstKey = distSourceCache.keys().next().value;
+          if (firstKey) distSourceCache.delete(firstKey);
+        }
+        distSourceCache.set(resolvedPath, candidate);
+        return candidate;
+      }
     }
   }
 
@@ -220,7 +286,7 @@ export function resolveProjectImport(
   resolver: ResolverFactory,
   fromDir: string,
   specifier: string,
-  projectRoot: string
+  projectRoot: string,
 ): string | null {
   try {
     const result = resolver.sync(fromDir, specifier);
@@ -239,7 +305,10 @@ export function resolveProjectImport(
   return null;
 }
 
-export function createResolver(projectRoot: string, tsconfigPath: string): ResolverFactory {
+export function createResolver(
+  projectRoot: string,
+  tsconfigPath: string,
+): ResolverFactory {
   return new ResolverFactory({
     tsconfig: {
       configFile: path.resolve(projectRoot, tsconfigPath),
@@ -259,52 +328,74 @@ export function createResolver(projectRoot: string, tsconfigPath: string): Resol
 
 // ─── Graph Construction ──────────────────────────────────────────────────────
 
-function buildForwardEdges(
+async function buildForwardEdges(
   files: string[],
   resolver: ResolverFactory,
-  projectRoot: string
-): { forward: Map<string, ImportEdge[]>; parseFailures: string[] } {
+  projectRoot: string,
+): Promise<{ forward: Map<string, ImportEdge[]>; parseFailures: string[] }> {
   const forward = new Map<string, ImportEdge[]>();
   const parseFailures: string[] = [];
 
-  for (const filePath of files) {
-    let source: string;
-    try {
-      source = fs.readFileSync(filePath, "utf-8");
-    } catch {
-      continue;
-    }
+  const CONCURRENCY = 32;
+  for (let i = 0; i < files.length; i += CONCURRENCY) {
+    const batch = files.slice(i, i + CONCURRENCY);
+    const results = await Promise.allSettled(
+      batch.map(async (filePath) => {
+        let source: string;
+        try {
+          source = await fs.promises.readFile(filePath, "utf-8");
+        } catch {
+          return null;
+        }
 
-    let rawImports: RawImport[];
-    try {
-      rawImports = parseFileImports(filePath, source);
-    } catch (err) {
-      parseFailures.push(filePath);
-      continue;
-    }
+        let rawImports: RawImport[];
+        try {
+          rawImports = parseFileImports(filePath, source);
+        } catch {
+          return { filePath, edges: [], failed: true };
+        }
 
-    const edges: ImportEdge[] = [];
-    const fromDir = path.dirname(filePath);
+        const edges: ImportEdge[] = [];
+        const fromDir = path.dirname(filePath);
 
-    for (const raw of rawImports) {
-      const target = resolveProjectImport(resolver, fromDir, raw.specifier, projectRoot);
-      if (target) {
-        edges.push({
-          target,
-          specifiers: raw.names,
-          isTypeOnly: raw.isTypeOnly,
-          isDynamic: raw.isDynamic,
-        });
+        for (const raw of rawImports) {
+          const target = resolveProjectImport(
+            resolver,
+            fromDir,
+            raw.specifier,
+            projectRoot,
+          );
+          if (target) {
+            edges.push({
+              target,
+              specifiers: raw.names,
+              isTypeOnly: raw.isTypeOnly,
+              isDynamic: raw.isDynamic,
+            });
+          }
+        }
+
+        return { filePath, edges, failed: false };
+      }),
+    );
+
+    for (const result of results) {
+      if (result.status === "rejected" || !result.value) continue;
+      const { filePath, edges, failed } = result.value;
+      if (failed) {
+        parseFailures.push(filePath);
+      } else {
+        forward.set(filePath, edges);
       }
     }
-
-    forward.set(filePath, edges);
   }
 
   return { forward, parseFailures };
 }
 
-function buildReverseMap(forward: Map<string, ImportEdge[]>): Map<string, ImportEdge[]> {
+function buildReverseMap(
+  forward: Map<string, ImportEdge[]>,
+): Map<string, ImportEdge[]> {
   const reverse = new Map<string, ImportEdge[]>();
 
   for (const [source, edges] of forward) {
@@ -328,7 +419,7 @@ function buildReverseMap(forward: Map<string, ImportEdge[]>): Map<string, Import
 
 export async function buildGraph(
   projectRoot: string,
-  tsconfigPath: string
+  tsconfigPath: string,
 ): Promise<BuildGraphResult> {
   const startTime = performance.now();
 
@@ -337,11 +428,18 @@ export async function buildGraph(
 
   log(`Discovered ${fileList.length} source files`);
 
-  const { forward, parseFailures } = buildForwardEdges(fileList, resolver, projectRoot);
+  const { forward, parseFailures } = await buildForwardEdges(
+    fileList,
+    resolver,
+    projectRoot,
+  );
   const reverse = buildReverseMap(forward);
   const files = new Set(fileList);
 
-  const edgeCount = [...forward.values()].reduce((sum, edges) => sum + edges.length, 0);
+  const edgeCount = [...forward.values()].reduce(
+    (sum, edges) => sum + edges.length,
+    0,
+  );
   const elapsed = (performance.now() - startTime).toFixed(0);
 
   log(`Graph built: ${files.size} files, ${edgeCount} edges [${elapsed}ms]`);
@@ -349,8 +447,18 @@ export async function buildGraph(
     log(`Parse failures: ${parseFailures.length} files`);
   }
 
+  // Build reverseIndex: source → target → index mapping
+  const reverseIndex = new Map<string, Map<string, number>>();
+  for (const [target, revEdges] of reverse) {
+    const sourceMap = new Map<string, number>();
+    for (let i = 0; i < revEdges.length; i++) {
+      sourceMap.set(revEdges[i]!.target, i);
+    }
+    reverseIndex.set(target, sourceMap);
+  }
+
   return {
-    graph: { forward, reverse, files },
+    graph: { forward, reverse, files, reverseIndex },
     resolver,
   };
 }
@@ -361,16 +469,27 @@ export function updateFile(
   graph: ModuleGraph,
   filePath: string,
   resolver: ResolverFactory,
-  projectRoot: string
+  projectRoot: string,
 ): void {
-  // Remove old forward edges from reverse map
+  // Remove old forward edges from reverse map using O(1) inverse index
   const oldEdges = graph.forward.get(filePath) ?? [];
   for (const edge of oldEdges) {
     const revEdges = graph.reverse.get(edge.target);
-    if (revEdges) {
-      const idx = revEdges.findIndex((r) => r.target === filePath);
-      if (idx !== -1) revEdges.splice(idx, 1);
-      if (revEdges.length === 0) graph.reverse.delete(edge.target);
+    const sourceMap = graph.reverseIndex.get(edge.target);
+    if (revEdges && sourceMap) {
+      const idx = sourceMap.get(filePath) ?? -1;
+      if (idx !== -1) {
+        revEdges.splice(idx, 1);
+        // Rebuild sourceMap after splice
+        sourceMap.clear();
+        for (let i = 0; i < revEdges.length; i++) {
+          sourceMap.set(revEdges[i]!.target, i);
+        }
+      }
+      if (revEdges.length === 0) {
+        graph.reverse.delete(edge.target);
+        graph.reverseIndex.delete(edge.target);
+      }
     }
   }
 
@@ -397,7 +516,12 @@ export function updateFile(
   const fromDir = path.dirname(filePath);
   const newEdges: ImportEdge[] = [];
   for (const raw of rawImports) {
-    const target = resolveProjectImport(resolver, fromDir, raw.specifier, projectRoot);
+    const target = resolveProjectImport(
+      resolver,
+      fromDir,
+      raw.specifier,
+      projectRoot,
+    );
     if (target) {
       newEdges.push({
         target,
@@ -412,31 +536,46 @@ export function updateFile(
   graph.forward.set(filePath, newEdges);
   graph.files.add(filePath);
 
-  // Update reverse map
+  // Update reverse map with O(1) index maintenance
   for (const edge of newEdges) {
     let revEdges = graph.reverse.get(edge.target);
+    let sourceMap = graph.reverseIndex.get(edge.target);
     if (!revEdges) {
       revEdges = [];
       graph.reverse.set(edge.target, revEdges);
+      sourceMap = new Map();
+      graph.reverseIndex.set(edge.target, sourceMap);
     }
+    const newIdx = revEdges.length;
     revEdges.push({
       target: filePath,
       specifiers: edge.specifiers,
       isTypeOnly: edge.isTypeOnly,
       isDynamic: edge.isDynamic,
     });
+    sourceMap!.set(filePath, newIdx);
   }
 }
 
 export function removeFile(graph: ModuleGraph, filePath: string): void {
-  // Remove forward edges from reverse map
+  // Remove forward edges from reverse map using O(1) inverse index
   const edges = graph.forward.get(filePath) ?? [];
   for (const edge of edges) {
     const revEdges = graph.reverse.get(edge.target);
-    if (revEdges) {
-      const idx = revEdges.findIndex((r) => r.target === filePath);
-      if (idx !== -1) revEdges.splice(idx, 1);
-      if (revEdges.length === 0) graph.reverse.delete(edge.target);
+    const sourceMap = graph.reverseIndex.get(edge.target);
+    if (revEdges && sourceMap) {
+      const idx = sourceMap.get(filePath) ?? -1;
+      if (idx !== -1) {
+        revEdges.splice(idx, 1);
+        sourceMap.clear();
+        for (let i = 0; i < revEdges.length; i++) {
+          sourceMap.set(revEdges[i]!.target, i);
+        }
+      }
+      if (revEdges.length === 0) {
+        graph.reverse.delete(edge.target);
+        graph.reverseIndex.delete(edge.target);
+      }
     }
   }
 
@@ -452,6 +591,7 @@ export function removeFile(graph: ModuleGraph, filePath: string): void {
 
   graph.forward.delete(filePath);
   graph.reverse.delete(filePath);
+  graph.reverseIndex.delete(filePath);
   graph.files.delete(filePath);
 }
 
@@ -464,7 +604,7 @@ export function startWatcher(
   hooks?: {
     onFileUpdated?: (filePath: string) => void | Promise<void>;
     onFileDeleted?: (filePath: string) => void | Promise<void>;
-  }
+  },
 ): void {
   try {
     const watcher = fs.watch(
@@ -499,7 +639,7 @@ export function startWatcher(
           removeFile(graph, absPath);
           void hooks?.onFileDeleted?.(absPath);
         }
-      }
+      },
     );
 
     // Cleanup on process exit

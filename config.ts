@@ -5,6 +5,7 @@
  * and smoke-test.ts into a single module.
  */
 
+import * as fs from "node:fs";
 import * as path from "node:path";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -20,6 +21,70 @@ export interface TypegraphConfig {
   toolIsEmbedded: boolean;
   /** Path to tool dir — relative to projectRoot if embedded, else absolute */
   toolRelPath: string;
+}
+
+export interface ConfigValidationResult {
+  valid: boolean;
+  errors: string[];
+  warnings: string[];
+}
+
+// ─── Validation ──────────────────────────────────────────────────────────────
+
+/**
+ * Validate a TypegraphConfig object.
+ * Returns validation result with errors and warnings.
+ */
+export function validateConfig(
+  config: TypegraphConfig,
+): ConfigValidationResult {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+
+  // Check project root exists
+  if (!fs.existsSync(config.projectRoot)) {
+    errors.push(`Project root not found: ${config.projectRoot}`);
+  }
+
+  // Check tsconfig exists
+  const tsconfigAbs = path.resolve(config.projectRoot, config.tsconfigPath);
+  if (!fs.existsSync(tsconfigAbs)) {
+    errors.push(`tsconfig.json not found at: ${tsconfigAbs}`);
+  }
+
+  // Check tool directory exists
+  if (!fs.existsSync(config.toolDir)) {
+    errors.push(`Tool directory not found: ${config.toolDir}`);
+  }
+
+  // Check package.json exists in project root
+  const packageJsonPath = path.join(config.projectRoot, "package.json");
+  if (!fs.existsSync(packageJsonPath)) {
+    warnings.push(
+      `package.json not found in project root: ${config.projectRoot}`,
+    );
+  }
+
+  // Check TypeScript is available
+  try {
+    const tsPath = path.join(
+      config.projectRoot,
+      "node_modules/typescript/lib/tsserver.js",
+    );
+    if (!fs.existsSync(tsPath)) {
+      warnings.push(
+        "TypeScript not found in project — some features may not work",
+      );
+    }
+  } catch {
+    warnings.push("TypeScript check failed — some features may not work");
+  }
+
+  return {
+    valid: errors.length === 0,
+    errors,
+    warnings,
+  };
 }
 
 // ─── Resolution ──────────────────────────────────────────────────────────────
@@ -44,7 +109,9 @@ export function resolveConfig(toolDir: string): TypegraphConfig {
   const tsconfigPath = process.env["TYPEGRAPH_TSCONFIG"] || "./tsconfig.json";
 
   const toolIsEmbedded = toolDir.startsWith(projectRoot + path.sep);
-  const toolRelPath = toolIsEmbedded ? path.relative(projectRoot, toolDir) : toolDir;
+  const toolRelPath = toolIsEmbedded
+    ? path.relative(projectRoot, toolDir)
+    : toolDir;
 
   return { projectRoot, tsconfigPath, toolDir, toolIsEmbedded, toolRelPath };
 }
