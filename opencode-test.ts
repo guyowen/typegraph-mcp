@@ -6,8 +6,8 @@ import * as os from "node:os";
 import * as path from "node:path";
 import {
   detectAgents,
-  registerOpenCodeMcp,
-  deregisterOpenCodeMcp,
+  registerAgentJsonMcp,
+  deregisterAgentJsonMcp,
   type AgentId,
 } from "./cli.js";
 
@@ -84,10 +84,10 @@ async function main(): Promise<void> {
     );
     console.log("  ✓ multiple agent files detected correctly");
 
-    // ─── registerOpenCodeMcp tests ───────────────────────────────────────
+    // ─── registerAgentJsonMcp tests ───────────────────────────────────────
 
     console.log("");
-    console.log("── registerOpenCodeMcp ──────────────────────────────────");
+    console.log("── registerAgentJsonMcp ──────────────────────────────────");
 
     // Register to new file
     const registerDir = path.join(tempRoot, "register");
@@ -97,7 +97,7 @@ async function main(): Promise<void> {
         recursive: true,
       },
     );
-    registerOpenCodeMcp(registerDir);
+    registerAgentJsonMcp(registerDir, "opencode.json");
 
     const configPath = path.join(registerDir, "opencode.json");
     assert.ok(fs.existsSync(configPath), "Expected opencode.json created");
@@ -137,7 +137,7 @@ async function main(): Promise<void> {
         mcp: { other: { type: "remote", url: "https://example.com" } },
       }),
     );
-    registerOpenCodeMcp(existingDir);
+    registerAgentJsonMcp(existingDir, "opencode.json");
 
     const existingConfig = JSON.parse(
       fs.readFileSync(path.join(existingDir, "opencode.json"), "utf-8"),
@@ -158,14 +158,14 @@ async function main(): Promise<void> {
     const invalidDir = path.join(tempRoot, "invalid");
     fs.mkdirSync(invalidDir);
     fs.writeFileSync(path.join(invalidDir, "opencode.json"), "not json{{{");
-    registerOpenCodeMcp(invalidDir);
+    registerAgentJsonMcp(invalidDir, "opencode.json");
     // Should not throw, should warn
     console.log("  ✓ handles invalid JSON gracefully");
 
-    // ─── deregisterOpenCodeMcp tests ─────────────────────────────────────
+    // ─── deregisterAgentJsonMcp tests ─────────────────────────────────────
 
     console.log("");
-    console.log("── deregisterOpenCodeMcp ────────────────────────────────");
+    console.log("── deregisterAgentJsonMcp ────────────────────────────────");
 
     // Deregister removes typegraph entry
     const deregisterDir = path.join(tempRoot, "deregister");
@@ -179,7 +179,7 @@ async function main(): Promise<void> {
         },
       }),
     );
-    deregisterOpenCodeMcp(deregisterDir);
+    deregisterAgentJsonMcp(deregisterDir, "opencode.json");
 
     const deregistered = JSON.parse(
       fs.readFileSync(path.join(deregisterDir, "opencode.json"), "utf-8"),
@@ -197,7 +197,7 @@ async function main(): Promise<void> {
         mcp: { typegraph: { type: "local", command: ["tsx", "server.ts"] } },
       }),
     );
-    deregisterOpenCodeMcp(emptyAfterDir);
+    deregisterAgentJsonMcp(emptyAfterDir, "opencode.json");
     assert.ok(
       !fs.existsSync(path.join(emptyAfterDir, "opencode.json")),
       "Expected opencode.json removed when empty",
@@ -207,7 +207,7 @@ async function main(): Promise<void> {
     // Deregister handles missing file
     const missingDir = path.join(tempRoot, "missing");
     fs.mkdirSync(missingDir);
-    deregisterOpenCodeMcp(missingDir);
+    deregisterAgentJsonMcp(missingDir, "opencode.json");
     console.log("  ✓ handles missing opencode.json gracefully");
 
     // Deregister handles no typegraph entry
@@ -219,7 +219,7 @@ async function main(): Promise<void> {
         mcp: { other: { type: "remote", url: "https://example.com" } },
       }),
     );
-    deregisterOpenCodeMcp(noTypegraphDir);
+    deregisterAgentJsonMcp(noTypegraphDir, "opencode.json");
 
     const noTypegraphConfig = JSON.parse(
       fs.readFileSync(path.join(noTypegraphDir, "opencode.json"), "utf-8"),

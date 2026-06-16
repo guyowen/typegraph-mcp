@@ -7,29 +7,32 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { z } from "zod";
 
-// ─── Types ───────────────────────────────────────────────────────────────────
+// ─── Zod Schema ──────────────────────────────────────────────────────────────
 
-export interface TypegraphConfig {
+export const TypegraphConfigSchema = z.object({
   /** Absolute path to the target project root */
-  projectRoot: string;
+  projectRoot: z.string().min(1),
   /** Relative tsconfig path (e.g. "./tsconfig.json") */
-  tsconfigPath: string;
+  tsconfigPath: z.string().min(1),
   /** Absolute path to the typegraph-mcp tool directory */
-  toolDir: string;
+  toolDir: z.string().min(1),
   /** Whether typegraph-mcp is embedded inside the project (e.g. plugins/typegraph-mcp/) */
-  toolIsEmbedded: boolean;
+  toolIsEmbedded: z.boolean(),
   /** Path to tool dir — relative to projectRoot if embedded, else absolute */
-  toolRelPath: string;
-}
+  toolRelPath: z.string().min(1),
+});
+
+export type TypegraphConfig = z.infer<typeof TypegraphConfigSchema>;
+
+// ─── Validation ──────────────────────────────────────────────────────────────
 
 export interface ConfigValidationResult {
   valid: boolean;
   errors: string[];
   warnings: string[];
 }
-
-// ─── Validation ──────────────────────────────────────────────────────────────
 
 /**
  * Validate a TypegraphConfig object.
@@ -40,6 +43,16 @@ export function validateConfig(
 ): ConfigValidationResult {
   const errors: string[] = [];
   const warnings: string[] = [];
+
+  // Zod schema validation
+  const result = TypegraphConfigSchema.safeParse(config);
+  if (!result.success) {
+    for (const issue of result.error.issues) {
+      errors.push(
+        `Config validation: ${issue.path.join(".")}: ${issue.message}`,
+      );
+    }
+  }
 
   // Check project root exists
   if (!fs.existsSync(config.projectRoot)) {

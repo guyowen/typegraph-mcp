@@ -29,7 +29,8 @@ export type AgentId =
   | "codex"
   | "gemini"
   | "copilot"
-  | "opencode";
+  | "opencode"
+  | "mimocode";
 
 interface AgentDef {
   name: string;
@@ -94,6 +95,7 @@ export const AGENT_IDS: AgentId[] = [
   "gemini",
   "copilot",
   "opencode",
+  "mimocode",
 ];
 
 export const AGENTS: Record<AgentId, AgentDef> = {
@@ -151,6 +153,13 @@ export const AGENTS: Record<AgentId, AgentDef> = {
     detect: (root) =>
       fs.existsSync(path.join(root, "opencode.json")) ||
       fs.existsSync(path.join(root, "opencode.jsonc")),
+  },
+  mimocode: {
+    name: "MiMo Code",
+    pluginFiles: [],
+    agentFile: null,
+    needsAgentsSkills: true,
+    detect: (root) => fs.existsSync(path.join(root, "mimocode.json")),
   },
 };
 
@@ -549,7 +558,10 @@ function registerMcpServers(
     registerJsonMcp(projectRoot, ".vscode/mcp.json", "servers");
   }
   if (selectedAgents.includes("opencode")) {
-    registerOpenCodeMcp(projectRoot);
+    registerAgentJsonMcp(projectRoot, "opencode.json");
+  }
+  if (selectedAgents.includes("mimocode")) {
+    registerAgentJsonMcp(projectRoot, "mimocode.json");
   }
 }
 
@@ -558,7 +570,8 @@ function deregisterMcpServers(projectRoot: string): void {
   deregisterJsonMcp(projectRoot, ".cursor/mcp.json", "mcpServers");
   deregisterCodexMcp(projectRoot);
   deregisterJsonMcp(projectRoot, ".vscode/mcp.json", "servers");
-  deregisterOpenCodeMcp(projectRoot);
+  deregisterAgentJsonMcp(projectRoot, "opencode.json");
+  deregisterAgentJsonMcp(projectRoot, "mimocode.json");
 }
 
 /** Register MCP server in a JSON config file (Cursor or Copilot format) */
@@ -685,9 +698,11 @@ function deregisterCodexMcp(projectRoot: string): void {
   }
 }
 
-/** Register MCP server in OpenCode's JSON config */
-export function registerOpenCodeMcp(projectRoot: string): void {
-  const configPath = "opencode.json";
+/** Register typegraph MCP server in an agent's JSON config file */
+export function registerAgentJsonMcp(
+  projectRoot: string,
+  configPath: string,
+): void {
   const fullPath = path.resolve(projectRoot, configPath);
   let config: Record<string, unknown> = {};
 
@@ -726,9 +741,11 @@ export function registerOpenCodeMcp(projectRoot: string): void {
   p.log.success(`${configPath}: registered typegraph MCP server`);
 }
 
-/** Deregister MCP server from OpenCode's JSON config */
-export function deregisterOpenCodeMcp(projectRoot: string): void {
-  const configPath = "opencode.json";
+/** Deregister typegraph MCP server from an agent's JSON config file */
+export function deregisterAgentJsonMcp(
+  projectRoot: string,
+  configPath: string,
+): void {
   const fullPath = path.resolve(projectRoot, configPath);
   if (!fs.existsSync(fullPath)) return;
 

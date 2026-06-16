@@ -11,7 +11,8 @@ export type AgentId =
   | "codex"
   | "gemini"
   | "copilot"
-  | "opencode";
+  | "opencode"
+  | "mimocode";
 
 export interface AgentDef {
   name: string;
