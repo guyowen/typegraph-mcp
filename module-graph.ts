@@ -11,6 +11,14 @@ import { parseSync } from "oxc-parser";
 import { ResolverFactory } from "oxc-resolver";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import {
+  loadDiskCache,
+  validateDiskCache,
+  saveDiskCache,
+  updateCacheEntry,
+  removeCacheEntry,
+  type DiskCache,
+} from "./disk-cache.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -32,6 +40,10 @@ export interface ModuleGraph {
 export interface BuildGraphResult {
   graph: ModuleGraph;
   resolver: ResolverFactory;
+  diskCacheFiles: Record<
+    string,
+    { mtime: number; size: number; imports: ImportEdge[] }
+  >;
 }
 
 // ─── Logging ─────────────────────────────────────────────────────────────────
@@ -102,6 +114,47 @@ interface RawImport {
   names: string[]; // imported names, or ["*"] for star
   isTypeOnly: boolean;
   isDynamic: boolean;
+}
+
+// ─── Parse Cache ──────────────────────────────────────────────────────────────
+
+interface ParseCacheEntry {
+  imports: RawImport[];
+  mtime: number;
+  size: number;
+}
+
+const parseCache = new Map<string, ParseCacheEntry>();
+const PARSE_CACHE_MAX = 2000;
+
+function parseFileImportsCached(
+  filePath: string,
+): { imports: RawImport[]; cacheHit: boolean } | null {
+  try {
+    const stat = fs.statSync(filePath);
+    const cached = parseCache.get(filePath);
+
+    if (cached && cached.mtime === stat.mtimeMs && cached.size === stat.size) {
+      return { imports: cached.imports, cacheHit: true };
+    }
+
+    const source = fs.readFileSync(filePath, "utf-8");
+    const imports = parseFileImports(filePath, source);
+
+    if (parseCache.size >= PARSE_CACHE_MAX) {
+      const firstKey = parseCache.keys().next().value;
+      if (firstKey) parseCache.delete(firstKey);
+    }
+    parseCache.set(filePath, { imports, mtime: stat.mtimeMs, size: stat.size });
+
+    return { imports, cacheHit: false };
+  } catch {
+    return null;
+  }
+}
+
+function invalidateParseCache(filePath: string): void {
+  parseCache.delete(filePath);
 }
 
 function parseFileImports(filePath: string, source: string): RawImport[] {
@@ -328,32 +381,30 @@ export function createResolver(
 
 // ─── Graph Construction ──────────────────────────────────────────────────────
 
-async function buildForwardEdges(
+export async function buildForwardEdges(
   files: string[],
   resolver: ResolverFactory,
   projectRoot: string,
-): Promise<{ forward: Map<string, ImportEdge[]>; parseFailures: string[] }> {
+): Promise<{
+  forward: Map<string, ImportEdge[]>;
+  parseFailures: string[];
+  cacheHits: number;
+}> {
   const forward = new Map<string, ImportEdge[]>();
   const parseFailures: string[] = [];
+  let cacheHits = 0;
 
   const CONCURRENCY = 32;
   for (let i = 0; i < files.length; i += CONCURRENCY) {
     const batch = files.slice(i, i + CONCURRENCY);
     const results = await Promise.allSettled(
       batch.map(async (filePath) => {
-        let source: string;
-        try {
-          source = await fs.promises.readFile(filePath, "utf-8");
-        } catch {
-          return null;
+        const result = parseFileImportsCached(filePath);
+        if (!result) {
+          return { filePath, edges: [], failed: true, cacheHit: false };
         }
 
-        let rawImports: RawImport[];
-        try {
-          rawImports = parseFileImports(filePath, source);
-        } catch {
-          return { filePath, edges: [], failed: true };
-        }
+        const { imports: rawImports, cacheHit } = result;
 
         const edges: ImportEdge[] = [];
         const fromDir = path.dirname(filePath);
@@ -375,22 +426,23 @@ async function buildForwardEdges(
           }
         }
 
-        return { filePath, edges, failed: false };
+        return { filePath, edges, failed: false, cacheHit };
       }),
     );
 
     for (const result of results) {
       if (result.status === "rejected" || !result.value) continue;
-      const { filePath, edges, failed } = result.value;
+      const { filePath, edges, failed, cacheHit } = result.value;
       if (failed) {
         parseFailures.push(filePath);
       } else {
         forward.set(filePath, edges);
+        if (cacheHit) cacheHits++;
       }
     }
   }
 
-  return { forward, parseFailures };
+  return { forward, parseFailures, cacheHits };
 }
 
 function buildReverseMap(
@@ -428,7 +480,7 @@ export async function buildGraph(
 
   log(`Discovered ${fileList.length} source files`);
 
-  const { forward, parseFailures } = await buildForwardEdges(
+  const { forward, parseFailures, cacheHits } = await buildForwardEdges(
     fileList,
     resolver,
     projectRoot,
@@ -443,6 +495,9 @@ export async function buildGraph(
   const elapsed = (performance.now() - startTime).toFixed(0);
 
   log(`Graph built: ${files.size} files, ${edgeCount} edges [${elapsed}ms]`);
+  if (cacheHits > 0) {
+    log(`Parse cache: ${cacheHits}/${fileList.length} files cached`);
+  }
   if (parseFailures.length > 0) {
     log(`Parse failures: ${parseFailures.length} files`);
   }
@@ -457,9 +512,28 @@ export async function buildGraph(
     reverseIndex.set(target, sourceMap);
   }
 
+  // Build disk cache entries from forward map
+  const diskCacheFiles: Record<
+    string,
+    { mtime: number; size: number; imports: ImportEdge[] }
+  > = {};
+  for (const [filePath, edges] of forward) {
+    try {
+      const stat = fs.statSync(filePath);
+      diskCacheFiles[filePath] = {
+        mtime: stat.mtimeMs,
+        size: stat.size,
+        imports: edges,
+      };
+    } catch {
+      // Skip unreadable files
+    }
+  }
+
   return {
     graph: { forward, reverse, files, reverseIndex },
     resolver,
+    diskCacheFiles,
   };
 }
 
@@ -471,6 +545,9 @@ export function updateFile(
   resolver: ResolverFactory,
   projectRoot: string,
 ): void {
+  // Invalidate parse cache for this file
+  invalidateParseCache(filePath);
+
   // Remove old forward edges from reverse map using O(1) inverse index
   const oldEdges = graph.forward.get(filePath) ?? [];
   for (const edge of oldEdges) {
@@ -493,24 +570,14 @@ export function updateFile(
     }
   }
 
-  // Re-parse file
-  let source: string;
-  try {
-    source = fs.readFileSync(filePath, "utf-8");
-  } catch {
-    // File unreadable — remove it
+  // Re-parse file (cache will be populated by parseFileImportsCached)
+  const parseResult = parseFileImportsCached(filePath);
+  if (!parseResult) {
+    // File unreadable or parse error — remove it
     removeFile(graph, filePath);
     return;
   }
-
-  let rawImports: RawImport[];
-  try {
-    rawImports = parseFileImports(filePath, source);
-  } catch {
-    log(`Parse error on update: ${filePath}`);
-    graph.forward.set(filePath, []);
-    return;
-  }
+  const { imports: rawImports } = parseResult;
 
   // Build new edges
   const fromDir = path.dirname(filePath);
@@ -606,6 +673,9 @@ export function startWatcher(
     onFileDeleted?: (filePath: string) => void | Promise<void>;
   },
 ): void {
+  const pendingUpdates = new Map<string, NodeJS.Timeout>();
+  const DEBOUNCE_MS = 50;
+
   try {
     const watcher = fs.watch(
       projectRoot,
@@ -630,21 +700,40 @@ export function startWatcher(
 
         const absPath = path.resolve(projectRoot, filename);
 
-        if (fs.existsSync(absPath)) {
-          // File created or modified
-          updateFile(graph, absPath, resolver, projectRoot);
-          void hooks?.onFileUpdated?.(absPath);
-        } else {
-          // File deleted
-          removeFile(graph, absPath);
-          void hooks?.onFileDeleted?.(absPath);
-        }
+        // Debounce rapid file changes
+        const existing = pendingUpdates.get(absPath);
+        if (existing) clearTimeout(existing);
+
+        pendingUpdates.set(
+          absPath,
+          setTimeout(() => {
+            pendingUpdates.delete(absPath);
+            // Wait for file write to fully flush
+            setTimeout(() => {
+              if (fs.existsSync(absPath)) {
+                // File created or modified
+                updateFile(graph, absPath, resolver, projectRoot);
+                void hooks?.onFileUpdated?.(absPath);
+              } else {
+                // File deleted
+                removeFile(graph, absPath);
+                void hooks?.onFileDeleted?.(absPath);
+              }
+            }, 10);
+          }, DEBOUNCE_MS),
+        );
       },
     );
 
     // Cleanup on process exit
-    process.on("SIGINT", () => watcher.close());
-    process.on("SIGTERM", () => watcher.close());
+    process.on("SIGINT", () => {
+      watcher.close();
+      for (const timer of pendingUpdates.values()) clearTimeout(timer);
+    });
+    process.on("SIGTERM", () => {
+      watcher.close();
+      for (const timer of pendingUpdates.values()) clearTimeout(timer);
+    });
 
     log("File watcher started");
   } catch (err) {
