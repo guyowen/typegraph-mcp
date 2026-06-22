@@ -4,12 +4,13 @@ import * as assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { registerAgentJsonMcp, deregisterAgentJsonMcp } from "./cli.js";
 import {
-  detectAgents,
-  registerAgentJsonMcp,
-  deregisterAgentJsonMcp,
   type AgentId,
-} from "./cli.js";
+  detectAgents,
+  AGENT_IDS,
+  AGENTS,
+} from "./src/cli/agents/index.js";
 
 function assertIncludes(text: string, expected: string): void {
   assert.ok(
@@ -37,7 +38,7 @@ async function main(): Promise<void> {
     // No config files
     const emptyDir = path.join(tempRoot, "empty");
     fs.mkdirSync(emptyDir);
-    const detectedEmpty = detectAgents(emptyDir);
+    const detectedEmpty = detectAgents(emptyDir, AGENT_IDS, AGENTS);
     assert.deepEqual(
       detectedEmpty,
       [],
@@ -49,7 +50,7 @@ async function main(): Promise<void> {
     const opencodeDir = path.join(tempRoot, "opencode");
     fs.mkdirSync(opencodeDir);
     fs.writeFileSync(path.join(opencodeDir, "opencode.json"), "{}");
-    const detectedOpenCode = detectAgents(opencodeDir);
+    const detectedOpenCode = detectAgents(opencodeDir, AGENT_IDS, AGENTS);
     assert.ok(
       detectedOpenCode.includes("opencode"),
       "Expected opencode detected",
@@ -61,7 +62,11 @@ async function main(): Promise<void> {
     const opencodeJsoncDir = path.join(tempRoot, "opencode-jsonc");
     fs.mkdirSync(opencodeJsoncDir);
     fs.writeFileSync(path.join(opencodeJsoncDir, "opencode.jsonc"), "{}");
-    const detectedOpenCodeJsonc = detectAgents(opencodeJsoncDir);
+    const detectedOpenCodeJsonc = detectAgents(
+      opencodeJsoncDir,
+      AGENT_IDS,
+      AGENTS,
+    );
     assert.ok(
       detectedOpenCodeJsonc.includes("opencode"),
       "Expected opencode detected from .jsonc",
@@ -73,7 +78,7 @@ async function main(): Promise<void> {
     fs.mkdirSync(multiDir);
     fs.writeFileSync(path.join(multiDir, "opencode.json"), "{}");
     fs.writeFileSync(path.join(multiDir, "CLAUDE.md"), "");
-    const detectedMulti = detectAgents(multiDir);
+    const detectedMulti = detectAgents(multiDir, AGENT_IDS, AGENTS);
     assert.ok(
       detectedMulti.includes("opencode"),
       "Expected opencode in multi-agent",

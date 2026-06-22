@@ -31,11 +31,6 @@ import {
   detectAgents,
 } from "./src/cli/agents/index.js";
 import { cleanDiskCache } from "./disk-cache.js";
-import {
-  removeTomlSectionGroup,
-  upsertTomlSection,
-  pathEqualsOrContains,
-} from "./src/cli/agents/toml-helpers.js";
 
 // Re-export for backward compatibility
 export { PLUGIN_DIR_NAME, AGENT_IDS, AGENTS, detectAgents };
@@ -140,6 +135,7 @@ Commands:
   test     Run smoke tests (all 14 tools)
   bench    Run benchmarks (token, latency, accuracy)
   start    Start the MCP server (stdin/stdout)
+  clean    Remove disk cache (node_modules/.cache/typegraph-mcp/)
 
 Options:
   --yes                 Skip confirmation prompts (accept all defaults)
@@ -210,6 +206,111 @@ function getCodexConfigPath(projectRoot: string): string {
   return path.resolve(projectRoot, ".codex/config.toml");
 }
 
+function isTomlSectionGroup(
+  sectionName: string | null,
+  prefix: string,
+): boolean {
+  return (
+    sectionName === prefix || sectionName?.startsWith(`${prefix}.`) === true
+  );
+}
+
+function splitTomlBlocks(
+  content: string,
+): Array<{ sectionName: string | null; raw: string }> {
+  const lines = content.split(/\r?\n/);
+  const blocks: Array<{ sectionName: string | null; raw: string }> = [];
+  let sectionName: string | null = null;
+  let currentLines: string[] = [];
+
+  for (const line of lines) {
+    const match = line.match(/^\[([^\]]+)\]\s*$/);
+    if (match) {
+      if (currentLines.length > 0 || sectionName !== null) {
+        blocks.push({ sectionName, raw: currentLines.join("\n") });
+      }
+      sectionName = match[1]!;
+      currentLines = [line];
+      continue;
+    }
+
+    currentLines.push(line);
+  }
+
+  if (currentLines.length > 0 || sectionName !== null) {
+    blocks.push({ sectionName, raw: currentLines.join("\n") });
+  }
+
+  return blocks;
+}
+
+function removeTomlSectionGroup(
+  content: string,
+  prefix: string,
+): { content: string; removed: boolean; removedContent: string } {
+  const blocks = splitTomlBlocks(content);
+  const removedBlocks = blocks.filter((block) =>
+    isTomlSectionGroup(block.sectionName, prefix),
+  );
+  if (removedBlocks.length === 0) {
+    return { content, removed: false, removedContent: "" };
+  }
+
+  const keptBlocks = blocks.filter(
+    (block) => !isTomlSectionGroup(block.sectionName, prefix),
+  );
+  const nextContent = keptBlocks
+    .map((block) => block.raw)
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trimEnd();
+
+  return {
+    content: nextContent ? `${nextContent}\n` : "",
+    removed: true,
+    removedContent: removedBlocks
+      .map((block) => block.raw)
+      .join("\n")
+      .trim(),
+  };
+}
+
+function upsertCodexMcpSection(
+  content: string,
+  block: string,
+): { content: string; changed: boolean } {
+  const sectionRe = /\n?\[mcp_servers\.typegraph\]\n[\s\S]*?(?=\n\[|$)/;
+  const normalizedBlock = block.trim();
+
+  if (sectionRe.test(content)) {
+    const existingSection = (content.match(sectionRe)?.[0] ?? "").trim();
+    if (existingSection === normalizedBlock) {
+      return { content, changed: false };
+    }
+
+    const nextContent = content.replace(sectionRe, `\n${normalizedBlock}\n`);
+    return { content: nextContent.trimEnd() + "\n", changed: true };
+  }
+
+  const nextContent = content
+    ? content.trimEnd() + "\n\n" + normalizedBlock + "\n"
+    : normalizedBlock + "\n";
+  return { content: nextContent, changed: true };
+}
+
+function makeCodexMcpBlock(projectRoot: string): string {
+  const absoluteEntry = getCodexMcpServerEntry(projectRoot);
+  const args = absoluteEntry.args.map((arg) => `"${arg}"`).join(", ");
+  return [
+    "",
+    "[mcp_servers.typegraph]",
+    `command = "${absoluteEntry.command}"`,
+    `args = [${args}]`,
+    `env = { TYPEGRAPH_PROJECT_ROOT = "${absoluteEntry.env.TYPEGRAPH_PROJECT_ROOT}", TYPEGRAPH_TSCONFIG = "${absoluteEntry.env.TYPEGRAPH_TSCONFIG}" }`,
+    "",
+  ].join("\n");
+}
+
 function isCodexProjectTrusted(projectRoot: string): boolean {
   const home = process.env.HOME;
   if (!home) return false;
@@ -250,6 +351,31 @@ function isCodexProjectTrusted(projectRoot: string): boolean {
   }
 
   return matchesTrustedProject();
+}
+
+function pathEqualsOrContains(
+  candidatePath: string,
+  targetPath: string,
+): boolean {
+  const resolvedCandidate = path.resolve(candidatePath);
+  const resolvedTarget = path.resolve(targetPath);
+  if (
+    resolvedCandidate === resolvedTarget ||
+    resolvedCandidate.startsWith(`${resolvedTarget}${path.sep}`)
+  ) {
+    return true;
+  }
+
+  try {
+    const realCandidate = fs.realpathSync(candidatePath);
+    const realTarget = fs.realpathSync(targetPath);
+    return (
+      realCandidate === realTarget ||
+      realCandidate.startsWith(`${realTarget}${path.sep}`)
+    );
+  } catch {
+    return false;
+  }
 }
 
 function findLegacyGlobalCodexCleanup(
@@ -439,16 +565,7 @@ function deregisterJsonMcp(
 function registerCodexMcp(projectRoot: string): void {
   const configPath = ".codex/config.toml";
   const fullPath = getCodexConfigPath(projectRoot);
-  const absoluteEntry = getCodexMcpServerEntry(projectRoot);
-  const args = absoluteEntry.args.map((arg) => `"${arg}"`).join(", ");
-  const block = [
-    "",
-    "[mcp_servers.typegraph]",
-    `command = "${absoluteEntry.command}"`,
-    `args = [${args}]`,
-    `env = { TYPEGRAPH_PROJECT_ROOT = "${absoluteEntry.env.TYPEGRAPH_PROJECT_ROOT}", TYPEGRAPH_TSCONFIG = "${absoluteEntry.env.TYPEGRAPH_TSCONFIG}" }`,
-    "",
-  ].join("\n");
+  const block = makeCodexMcpBlock(projectRoot);
   let content = "";
 
   if (fs.existsSync(fullPath)) {
@@ -460,9 +577,8 @@ function registerCodexMcp(projectRoot: string): void {
     fs.mkdirSync(dir, { recursive: true });
   }
 
-  const { content: nextContent, changed } = upsertTomlSection(
+  const { content: nextContent, changed } = upsertCodexMcpSection(
     content,
-    "mcp_servers.typegraph",
     block,
   );
   if (changed) {
@@ -1118,6 +1234,18 @@ async function benchmark(): Promise<void> {
   await benchMain(config);
 }
 
+// ─── Clean Command ───────────────────────────────────────────────────────────
+
+function clean(): void {
+  const projectRoot = process.cwd();
+  const cleaned = cleanDiskCache(projectRoot);
+  if (cleaned) {
+    console.log("Disk cache cleaned");
+  } else {
+    console.log("No disk cache found");
+  }
+}
+
 // ─── Start Command ───────────────────────────────────────────────────────────
 
 async function start(): Promise<void> {
@@ -1181,6 +1309,9 @@ if (isDirectRun) {
         console.error("Fatal:", err);
         process.exit(1);
       });
+      break;
+    case "clean":
+      clean();
       break;
     default:
       console.log(`Unknown command: ${command}`);
