@@ -79,6 +79,7 @@ const CORE_FILES = [
   "src/cli/agents/registry.ts",
   "src/cli/agents/toml-helpers.ts",
   "src/cli/agents/types.ts",
+  "src/health/checker.ts",
   "src/server/index.ts",
   "src/server/types.ts",
   "src/server/navigation.ts",
@@ -722,7 +723,7 @@ async function runVerification(
   const config = resolveConfig(pluginDir);
 
   console.log("");
-  const { main: checkMain } = await import("../../check.js");
+  const { main: checkMain } = await import("../health/checker.js");
   const checkResult = await checkMain(config);
 
   console.log("");

@@ -89,6 +89,7 @@ const CORE_FILES = [
   "src/cli/agents/registry.ts",
   "src/cli/agents/toml-helpers.ts",
   "src/cli/agents/types.ts",
+  "src/health/checker.ts",
   "src/server/index.ts",
   "src/server/types.ts",
   "src/server/navigation.ts",
@@ -148,7 +149,7 @@ function resolvePluginDir(): string {
 
 async function check(): Promise<void> {
   const config = resolveConfig(resolvePluginDir());
-  const { main: checkMain } = await import("./check.js");
+  const { main: checkMain } = await import("./src/health/checker.js");
   const result = await checkMain(config);
   process.exit(result.failed > 0 ? 1 : 0);
 }
