@@ -9,7 +9,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { execSync } from "node:child_process";
 import * as p from "@clack/prompts";
-import { resolveConfig } from "../../config.js";
+import { resolveConfig } from "../shared/config.js";
 import {
   ensureTsconfigExclude,
   ensureLintIgnores,
@@ -79,6 +79,10 @@ const CORE_FILES = [
   "src/cli/agents/registry.ts",
   "src/cli/agents/toml-helpers.ts",
   "src/cli/agents/types.ts",
+  "src/core/tsserver/client.ts",
+  "src/core/tsserver/index.ts",
+  "src/core/tsserver/types.ts",
+  "src/shared/config.ts",
   "src/health/checker.ts",
   "src/server/index.ts",
   "src/server/types.ts",

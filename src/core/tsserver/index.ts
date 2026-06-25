@@ -1,7 +1,7 @@
 /**
  * Tsserver Module
  *
- * TypeScript Server Protocol types for semantic code analysis.
+ * TypeScript Server Protocol types + client for semantic code analysis.
  */
 
 export type {
@@ -14,3 +14,5 @@ export type {
   PendingRequest,
   TsServerMessage,
 } from "./types.js";
+
+export { TsServerClient } from "./client.js";

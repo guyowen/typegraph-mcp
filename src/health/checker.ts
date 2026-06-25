@@ -13,7 +13,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { createRequire } from "node:module";
 import { spawn, spawnSync } from "node:child_process";
-import { resolveConfig, type TypegraphConfig } from "../../config.js";
+import { resolveConfig, type TypegraphConfig } from "../shared/config.js";
 
 // ─── Result Type ─────────────────────────────────────────────────────────────
 
@@ -673,7 +673,7 @@ export async function main(
       ({ buildGraph } = await import(path.resolve(toolDir, "module-graph.js")));
     } catch {
       // Fallback: plugin dir has .ts files only (no tsx at runtime), use the co-bundled version
-      ({ buildGraph } = await import("../../module-graph.js"));
+      ({ buildGraph } = await import("../../../module-graph.js"));
     }
     const start = performance.now();
     const { graph } = await buildGraph(projectRoot, tsconfigPath);

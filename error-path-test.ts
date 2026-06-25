@@ -15,7 +15,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import { TsServerClient } from "./tsserver-client.js";
+import { TsServerClient } from "./src/core/tsserver/index.js";
 import { getModuleExports, normalizeExistingPath } from "./export-resolver.js";
 import {
   discoverFiles,
@@ -25,7 +25,7 @@ import {
   buildGraph,
   type ModuleGraph,
 } from "./module-graph.js";
-import { validateConfig, type TypegraphConfig } from "./config.js";
+import { validateConfig, type TypegraphConfig } from "./src/shared/config.js";
 import { pathEqualsOrContains } from "./src/cli/agents/toml-helpers.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

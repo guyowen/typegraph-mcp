@@ -14,6 +14,8 @@ export default defineConfig({
     "graph-queries.ts",
     "export-resolver.ts",
     "tsconfig-patch.ts",
+    "src/core/tsserver/client.ts",
+    "src/shared/config.ts",
   ],
   format: ["esm"],
   target: "node22",

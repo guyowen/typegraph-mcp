@@ -13,7 +13,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { execSync } from "node:child_process";
-import { TsServerClient, type NavBarItem } from "./tsserver-client.js";
+import { TsServerClient, type NavBarItem } from "./src/core/tsserver/index.js";
 import { buildGraph, type ModuleGraph } from "./module-graph.js";
 import {
   dependencyTree,
@@ -23,7 +23,7 @@ import {
   subgraph,
   moduleBoundary,
 } from "./graph-queries.js";
-import { resolveConfig } from "./config.js";
+import { resolveConfig } from "./src/shared/config.js";
 
 // ─── Configuration ───────────────────────────────────────────────────────────
 
@@ -38,17 +38,21 @@ function estimateTokens(text: string): number {
 }
 
 /** Count grep matches for a pattern across the project */
-function grepCount(pattern: string): { matches: number; files: number; totalBytes: number } {
+function grepCount(pattern: string): {
+  matches: number;
+  files: number;
+  totalBytes: number;
+} {
   try {
     const result = execSync(
       `grep -r --include='*.ts' --include='*.tsx' -l "${pattern}" . 2>/dev/null || true`,
-      { cwd: projectRoot, encoding: "utf-8", maxBuffer: 10 * 1024 * 1024 }
+      { cwd: projectRoot, encoding: "utf-8", maxBuffer: 10 * 1024 * 1024 },
     ).trim();
     const files = result ? result.split("\n").filter(Boolean) : [];
 
     const countResult = execSync(
       `grep -r --include='*.ts' --include='*.tsx' -c "${pattern}" . 2>/dev/null || true`,
-      { cwd: projectRoot, encoding: "utf-8", maxBuffer: 10 * 1024 * 1024 }
+      { cwd: projectRoot, encoding: "utf-8", maxBuffer: 10 * 1024 * 1024 },
     ).trim();
     const matches = countResult
       .split("\n")
@@ -87,7 +91,8 @@ function flattenNavBar(items: NavBarItem[]): NavBarItem[] {
   const result: NavBarItem[] = [];
   for (const item of items) {
     result.push(item);
-    if (item.childItems?.length > 0) result.push(...flattenNavBar(item.childItems));
+    if (item.childItems?.length > 0)
+      result.push(...flattenNavBar(item.childItems));
   }
   return result;
 }
@@ -95,8 +100,12 @@ function flattenNavBar(items: NavBarItem[]): NavBarItem[] {
 // ─── Discovery ───────────────────────────────────────────────────────────────
 
 /** Find a barrel re-export chain: an index.ts that re-exports from non-index files */
-function findBarrelChain(graph: ModuleGraph): { barrelFile: string; sourceFile: string; specifiers: string[] } | null {
-  const barrels = [...graph.files].filter((f) => path.basename(f) === "index.ts");
+function findBarrelChain(
+  graph: ModuleGraph,
+): { barrelFile: string; sourceFile: string; specifiers: string[] } | null {
+  const barrels = [...graph.files].filter(
+    (f) => path.basename(f) === "index.ts",
+  );
 
   for (const barrel of barrels) {
     const edges = graph.forward.get(barrel) ?? [];
@@ -110,10 +119,14 @@ function findBarrelChain(graph: ModuleGraph): { barrelFile: string; sourceFile: 
       ) {
         // Check if the source file is also re-exported by another barrel (deeper chain)
         const parentBarrels = (graph.reverse.get(barrel) ?? []).filter(
-          (e) => path.basename(e.target) === "index.ts"
+          (e) => path.basename(e.target) === "index.ts",
         );
         if (parentBarrels.length > 0) {
-          return { barrelFile: barrel, sourceFile: edge.target, specifiers: edge.specifiers };
+          return {
+            barrelFile: barrel,
+            sourceFile: edge.target,
+            specifiers: edge.specifiers,
+          };
         }
       }
     }
@@ -123,8 +136,16 @@ function findBarrelChain(graph: ModuleGraph): { barrelFile: string; sourceFile: 
   for (const barrel of barrels) {
     const edges = graph.forward.get(barrel) ?? [];
     for (const edge of edges) {
-      if (edge.specifiers.length > 0 && !edge.specifiers.includes("*") && !edge.target.endsWith("index.ts")) {
-        return { barrelFile: barrel, sourceFile: edge.target, specifiers: edge.specifiers };
+      if (
+        edge.specifiers.length > 0 &&
+        !edge.specifiers.includes("*") &&
+        !edge.target.endsWith("index.ts")
+      ) {
+        return {
+          barrelFile: barrel,
+          sourceFile: edge.target,
+          specifiers: edge.specifiers,
+        };
       }
     }
   }
@@ -151,7 +172,9 @@ function findHighFanoutSymbol(graph: ModuleGraph): string | null {
 }
 
 /** Find a symbol whose name is a prefix of other symbols (disambiguation scenario) */
-function findPrefixSymbol(graph: ModuleGraph): { base: string; variants: string[] } | null {
+function findPrefixSymbol(
+  graph: ModuleGraph,
+): { base: string; variants: string[] } | null {
   const specCounts = new Map<string, number>();
   for (const edges of graph.forward.values()) {
     for (const edge of edges) {
@@ -164,9 +187,13 @@ function findPrefixSymbol(graph: ModuleGraph): { base: string; variants: string[
 
   // Find a symbol that is a prefix of other symbols
   const allSpecs = [...specCounts.keys()];
-  for (const [base, count] of [...specCounts.entries()].sort((a, b) => b[1] - a[1])) {
+  for (const [base, count] of [...specCounts.entries()].sort(
+    (a, b) => b[1] - a[1],
+  )) {
     if (count < 3) continue;
-    const variants = allSpecs.filter((s) => s !== base && s.startsWith(base) && s[base.length]?.match(/[A-Z]/));
+    const variants = allSpecs.filter(
+      (s) => s !== base && s.startsWith(base) && s[base.length]?.match(/[A-Z]/),
+    );
     if (variants.length >= 2) {
       return { base, variants: variants.slice(0, 5) };
     }
@@ -204,7 +231,9 @@ function findMostDependedFile(graph: ModuleGraph): string | null {
 }
 
 /** Find a file with a traceable call chain (imports something that imports something) */
-function findChainFile(graph: ModuleGraph): { file: string; symbol: string } | null {
+function findChainFile(
+  graph: ModuleGraph,
+): { file: string; symbol: string } | null {
   for (const [file, edges] of graph.forward) {
     if (file.endsWith("index.ts") || file.includes(".test.")) continue;
 
@@ -212,7 +241,9 @@ function findChainFile(graph: ModuleGraph): { file: string; symbol: string } | n
       if (edge.isTypeOnly || edge.specifiers.includes("*")) continue;
       // Check if the target also imports something
       const targetEdges = graph.forward.get(edge.target) ?? [];
-      const nonTrivialTarget = targetEdges.filter((e) => !e.isTypeOnly && !e.specifiers.includes("*"));
+      const nonTrivialTarget = targetEdges.filter(
+        (e) => !e.isTypeOnly && !e.specifiers.includes("*"),
+      );
       if (nonTrivialTarget.length > 0 && edge.specifiers.length > 0) {
         return { file, symbol: edge.specifiers[0]! };
       }
@@ -225,7 +256,12 @@ function findChainFile(graph: ModuleGraph): { file: string; symbol: string } | n
 /** Find a good test file for latency benchmarks (medium-sized, has symbols) */
 function findLatencyTestFile(graph: ModuleGraph): string | null {
   const candidates = [...graph.files]
-    .filter((f) => !f.endsWith("index.ts") && !f.includes(".test.") && !f.includes(".spec."))
+    .filter(
+      (f) =>
+        !f.endsWith("index.ts") &&
+        !f.includes(".test.") &&
+        !f.includes(".spec."),
+    )
     .map((f) => {
       try {
         return { file: f, size: fs.statSync(f).size };
@@ -233,12 +269,17 @@ function findLatencyTestFile(graph: ModuleGraph): string | null {
         return null;
       }
     })
-    .filter((c): c is { file: string; size: number } => c !== null && c.size > 500 && c.size < 30000)
+    .filter(
+      (c): c is { file: string; size: number } =>
+        c !== null && c.size > 500 && c.size < 30000,
+    )
     .sort((a, b) => b.size - a.size);
 
   // Prefer files with "service", "handler", etc. in the name
   const preferred = candidates.find((c) =>
-    /service|handler|controller|repository|provider/i.test(path.basename(c.file))
+    /service|handler|controller|repository|provider/i.test(
+      path.basename(c.file),
+    ),
   );
 
   return preferred?.file ?? candidates[0]?.file ?? null;
@@ -257,7 +298,7 @@ interface TokenScenario {
 
 async function benchmarkTokens(
   client: TsServerClient,
-  graph: ModuleGraph
+  graph: ModuleGraph,
 ): Promise<TokenScenario[]> {
   console.log("=== Benchmark 1: Token Comparison (grep vs typegraph-mcp) ===");
   console.log("");
@@ -269,13 +310,22 @@ async function benchmarkTokens(
   if (barrel) {
     const symbol = barrel.specifiers[0]!;
     const grep = grepCount(symbol);
-    const grepTokens = estimateTokens("x".repeat(Math.min(grep.totalBytes, 500000)));
+    const grepTokens = estimateTokens(
+      "x".repeat(Math.min(grep.totalBytes, 500000)),
+    );
 
     const navItems = await client.navto(symbol, 5);
     const def = navItems.find((i) => i.name === symbol);
-    let responseText = JSON.stringify({ results: navItems, count: navItems.length });
+    let responseText = JSON.stringify({
+      results: navItems,
+      count: navItems.length,
+    });
     if (def) {
-      const defs = await client.definition(def.file, def.start.line, def.start.offset);
+      const defs = await client.definition(
+        def.file,
+        def.start.line,
+        def.start.offset,
+      );
       responseText += JSON.stringify({ definitions: defs });
     }
 
@@ -283,11 +333,16 @@ async function benchmarkTokens(
       name: "Barrel re-export resolution",
       symbol,
       description: `Re-exported through ${relPath(barrel.barrelFile)}`,
-      grep: { matches: grep.matches, files: grep.files, tokensToRead: grepTokens },
+      grep: {
+        matches: grep.matches,
+        files: grep.files,
+        tokensToRead: grepTokens,
+      },
       typegraph: { responseTokens: estimateTokens(responseText), toolCalls: 2 },
-      reduction: grepTokens > 0
-        ? `${((1 - estimateTokens(responseText) / grepTokens) * 100).toFixed(0)}%`
-        : "N/A",
+      reduction:
+        grepTokens > 0
+          ? `${((1 - estimateTokens(responseText) / grepTokens) * 100).toFixed(0)}%`
+          : "N/A",
     });
   }
 
@@ -295,23 +350,37 @@ async function benchmarkTokens(
   const highFanout = findHighFanoutSymbol(graph);
   if (highFanout) {
     const grep = grepCount(highFanout);
-    const grepTokens = estimateTokens("x".repeat(Math.min(grep.totalBytes, 500000)));
+    const grepTokens = estimateTokens(
+      "x".repeat(Math.min(grep.totalBytes, 500000)),
+    );
 
     const navItems = await client.navto(highFanout, 10);
-    const refs = navItems.length > 0
-      ? await client.references(navItems[0]!.file, navItems[0]!.start.line, navItems[0]!.start.offset)
-      : [];
-    const responseText = JSON.stringify({ results: navItems }) + JSON.stringify({ count: refs.length });
+    const refs =
+      navItems.length > 0
+        ? await client.references(
+            navItems[0]!.file,
+            navItems[0]!.start.line,
+            navItems[0]!.start.offset,
+          )
+        : [];
+    const responseText =
+      JSON.stringify({ results: navItems }) +
+      JSON.stringify({ count: refs.length });
 
     scenarios.push({
       name: "High-fanout symbol lookup",
       symbol: highFanout,
       description: `Most-imported symbol in the project`,
-      grep: { matches: grep.matches, files: grep.files, tokensToRead: grepTokens },
+      grep: {
+        matches: grep.matches,
+        files: grep.files,
+        tokensToRead: grepTokens,
+      },
       typegraph: { responseTokens: estimateTokens(responseText), toolCalls: 2 },
-      reduction: grepTokens > 0
-        ? `${((1 - estimateTokens(responseText) / grepTokens) * 100).toFixed(0)}%`
-        : "N/A",
+      reduction:
+        grepTokens > 0
+          ? `${((1 - estimateTokens(responseText) / grepTokens) * 100).toFixed(0)}%`
+          : "N/A",
     });
   }
 
@@ -319,14 +388,20 @@ async function benchmarkTokens(
   const chainTarget = findChainFile(graph);
   if (chainTarget) {
     const grep = grepCount(chainTarget.symbol);
-    const grepTokens = estimateTokens("x".repeat(Math.min(grep.totalBytes, 500000)));
+    const grepTokens = estimateTokens(
+      "x".repeat(Math.min(grep.totalBytes, 500000)),
+    );
 
     const navItems = await client.navto(chainTarget.symbol, 5);
     let totalResponse = JSON.stringify({ results: navItems });
     let hops = 0;
 
     if (navItems.length > 0) {
-      let cur = { file: navItems[0]!.file, line: navItems[0]!.start.line, offset: navItems[0]!.start.offset };
+      let cur = {
+        file: navItems[0]!.file,
+        line: navItems[0]!.start.line,
+        offset: navItems[0]!.start.offset,
+      };
       for (let i = 0; i < 5; i++) {
         const defs = await client.definition(cur.file, cur.line, cur.offset);
         if (defs.length === 0) break;
@@ -335,7 +410,11 @@ async function benchmarkTokens(
         if (hop.file.includes("node_modules")) break;
         hops++;
         totalResponse += JSON.stringify({ definitions: defs });
-        cur = { file: hop.file, line: hop.start.line, offset: hop.start.offset };
+        cur = {
+          file: hop.file,
+          line: hop.start.line,
+          offset: hop.start.offset,
+        };
       }
     }
 
@@ -343,11 +422,19 @@ async function benchmarkTokens(
       name: "Call chain tracing",
       symbol: chainTarget.symbol,
       description: `${hops} hop(s) from ${relPath(chainTarget.file)}`,
-      grep: { matches: grep.matches, files: grep.files, tokensToRead: grepTokens },
-      typegraph: { responseTokens: estimateTokens(totalResponse), toolCalls: 1 + hops },
-      reduction: grepTokens > 0
-        ? `${((1 - estimateTokens(totalResponse) / grepTokens) * 100).toFixed(0)}%`
-        : "N/A",
+      grep: {
+        matches: grep.matches,
+        files: grep.files,
+        tokensToRead: grepTokens,
+      },
+      typegraph: {
+        responseTokens: estimateTokens(totalResponse),
+        toolCalls: 1 + hops,
+      },
+      reduction:
+        grepTokens > 0
+          ? `${((1 - estimateTokens(totalResponse) / grepTokens) * 100).toFixed(0)}%`
+          : "N/A",
     });
   }
 
@@ -356,7 +443,9 @@ async function benchmarkTokens(
   if (mostDepended) {
     const basename = path.basename(mostDepended, path.extname(mostDepended));
     const grep = grepCount(basename);
-    const grepTokens = estimateTokens("x".repeat(Math.min(grep.totalBytes, 500000)));
+    const grepTokens = estimateTokens(
+      "x".repeat(Math.min(grep.totalBytes, 500000)),
+    );
 
     const deps = dependents(graph, mostDepended);
     const responseText = JSON.stringify({
@@ -370,21 +459,30 @@ async function benchmarkTokens(
       name: "Impact analysis (most-depended file)",
       symbol: basename,
       description: `${relPath(mostDepended)} — ${deps.directCount} direct, ${deps.nodes} transitive`,
-      grep: { matches: grep.matches, files: grep.files, tokensToRead: grepTokens },
+      grep: {
+        matches: grep.matches,
+        files: grep.files,
+        tokensToRead: grepTokens,
+      },
       typegraph: { responseTokens: estimateTokens(responseText), toolCalls: 1 },
-      reduction: grepTokens > 0
-        ? `${((1 - estimateTokens(responseText) / grepTokens) * 100).toFixed(0)}%`
-        : "N/A",
+      reduction:
+        grepTokens > 0
+          ? `${((1 - estimateTokens(responseText) / grepTokens) * 100).toFixed(0)}%`
+          : "N/A",
     });
   }
 
   // Print results
   if (scenarios.length > 0) {
-    console.log("| Scenario | Symbol | grep matches | grep files | grep tokens | tg tokens | tg calls | reduction |");
-    console.log("|----------|--------|-------------|-----------|-------------|-----------|----------|-----------|");
+    console.log(
+      "| Scenario | Symbol | grep matches | grep files | grep tokens | tg tokens | tg calls | reduction |",
+    );
+    console.log(
+      "|----------|--------|-------------|-----------|-------------|-----------|----------|-----------|",
+    );
     for (const s of scenarios) {
       console.log(
-        `| ${s.name} | \`${s.symbol}\` | ${s.grep.matches} | ${s.grep.files} | ${s.grep.tokensToRead.toLocaleString()} | ${s.typegraph.responseTokens.toLocaleString()} | ${s.typegraph.toolCalls} | ${s.reduction} |`
+        `| ${s.name} | \`${s.symbol}\` | ${s.grep.matches} | ${s.grep.files} | ${s.grep.tokensToRead.toLocaleString()} | ${s.typegraph.responseTokens.toLocaleString()} | ${s.typegraph.toolCalls} | ${s.reduction} |`,
       );
     }
   } else {
@@ -409,7 +507,7 @@ interface LatencyResult {
 
 async function benchmarkLatency(
   client: TsServerClient,
-  graph: ModuleGraph
+  graph: ModuleGraph,
 ): Promise<LatencyResult[]> {
   console.log("=== Benchmark 2: Latency (ms per tool call) ===");
   console.log("");
@@ -431,9 +529,19 @@ async function benchmarkLatency(
   // Discover a concrete symbol from the file
   const bar = await client.navbar(testFileRel);
   const allSymbols = flattenNavBar(bar);
-  const concreteKinds = new Set(["const", "function", "class", "var", "let", "enum"]);
+  const concreteKinds = new Set([
+    "const",
+    "function",
+    "class",
+    "var",
+    "let",
+    "enum",
+  ]);
   const sym = allSymbols.find(
-    (item) => concreteKinds.has(item.kind) && item.text !== "<function>" && item.spans.length > 0
+    (item) =>
+      concreteKinds.has(item.kind) &&
+      item.text !== "<function>" &&
+      item.spans.length > 0,
   );
 
   if (!sym) {
@@ -448,9 +556,21 @@ async function benchmarkLatency(
   // tsserver tools
   const tsserverTools: Array<{ name: string; fn: () => Promise<unknown> }> = [
     { name: "ts_find_symbol", fn: () => client.navbar(testFileRel) },
-    { name: "ts_definition", fn: () => client.definition(testFileRel, span.start.line, span.start.offset) },
-    { name: "ts_references", fn: () => client.references(testFileRel, span.start.line, span.start.offset) },
-    { name: "ts_type_info", fn: () => client.quickinfo(testFileRel, span.start.line, span.start.offset) },
+    {
+      name: "ts_definition",
+      fn: () =>
+        client.definition(testFileRel, span.start.line, span.start.offset),
+    },
+    {
+      name: "ts_references",
+      fn: () =>
+        client.references(testFileRel, span.start.line, span.start.offset),
+    },
+    {
+      name: "ts_type_info",
+      fn: () =>
+        client.quickinfo(testFileRel, span.start.line, span.start.offset),
+    },
     { name: "ts_navigate_to", fn: () => client.navto(sym.text, 10) },
     { name: "ts_module_exports", fn: () => client.navbar(testFileRel) },
   ];
@@ -483,16 +603,22 @@ async function benchmarkLatency(
       name: "ts_shortest_path",
       fn: () => {
         const rev = graph.reverse.get(testFile);
-        if (rev && rev.length > 0) return shortestPath(graph, rev[0]!.target, testFile);
+        if (rev && rev.length > 0)
+          return shortestPath(graph, rev[0]!.target, testFile);
         return null;
       },
     },
-    { name: "ts_subgraph", fn: () => subgraph(graph, [testFile], { depth: 2, direction: "both" }) },
+    {
+      name: "ts_subgraph",
+      fn: () => subgraph(graph, [testFile], { depth: 2, direction: "both" }),
+    },
     {
       name: "ts_module_boundary",
       fn: () => {
         const dir = path.dirname(testFile);
-        const siblings = [...graph.files].filter((f) => path.dirname(f) === dir);
+        const siblings = [...graph.files].filter(
+          (f) => path.dirname(f) === dir,
+        );
         return moduleBoundary(graph, siblings);
       },
     },
@@ -522,7 +648,7 @@ async function benchmarkLatency(
   console.log("|------|-----|-----|-----|-----|-----|");
   for (const r of results) {
     console.log(
-      `| ${r.tool} | ${r.p50.toFixed(1)}ms | ${r.p95.toFixed(1)}ms | ${r.avg.toFixed(1)}ms | ${r.min.toFixed(1)}ms | ${r.max.toFixed(1)}ms |`
+      `| ${r.tool} | ${r.p50.toFixed(1)}ms | ${r.p95.toFixed(1)}ms | ${r.avg.toFixed(1)}ms | ${r.min.toFixed(1)}ms | ${r.max.toFixed(1)}ms |`,
     );
   }
   console.log("");
@@ -542,7 +668,7 @@ interface AccuracyScenario {
 
 async function benchmarkAccuracy(
   client: TsServerClient,
-  graph: ModuleGraph
+  graph: ModuleGraph,
 ): Promise<AccuracyScenario[]> {
   console.log("=== Benchmark 3: Accuracy (grep vs typegraph-mcp) ===");
   console.log("");
@@ -556,11 +682,17 @@ async function benchmarkAccuracy(
     const grep = grepCount(symbol);
 
     const navItems = await client.navto(symbol, 10);
-    const defItem = navItems.find((i) => i.name === symbol && i.matchKind === "exact");
+    const defItem = navItems.find(
+      (i) => i.name === symbol && i.matchKind === "exact",
+    );
     let defLocation = "";
 
     if (defItem) {
-      const defs = await client.definition(defItem.file, defItem.start.line, defItem.start.offset);
+      const defs = await client.definition(
+        defItem.file,
+        defItem.start.line,
+        defItem.start.offset,
+      );
       if (defs.length > 0) {
         defLocation = `${defs[0]!.file}:${defs[0]!.start.line}`;
       }
@@ -635,12 +767,13 @@ async function benchmarkAccuracy(
   {
     const cycles = importCycles(graph);
 
-    const cycleDetail = cycles.cycles.length > 0
-      ? cycles.cycles
-          .slice(0, 3)
-          .map((c) => c.map(relPath).join(" -> "))
-          .join("; ")
-      : "none";
+    const cycleDetail =
+      cycles.cycles.length > 0
+        ? cycles.cycles
+            .slice(0, 3)
+            .map((c) => c.map(relPath).join(" -> "))
+            .join("; ")
+        : "none";
 
     scenarios.push({
       name: "Circular dependency detection",
@@ -666,8 +799,12 @@ async function benchmarkAccuracy(
 
 // ─── Main ────────────────────────────────────────────────────────────────────
 
-export async function main(config?: { projectRoot: string; tsconfigPath: string }) {
-  ({ projectRoot, tsconfigPath } = config ?? resolveConfig(import.meta.dirname));
+export async function main(config?: {
+  projectRoot: string;
+  tsconfigPath: string;
+}) {
+  ({ projectRoot, tsconfigPath } =
+    config ?? resolveConfig(import.meta.dirname));
   console.log("");
   console.log("typegraph-mcp Benchmark");
   console.log("=======================");
@@ -678,8 +815,13 @@ export async function main(config?: { projectRoot: string; tsconfigPath: string 
   const graphStart = performance.now();
   const { graph } = await buildGraph(projectRoot, tsconfigPath);
   const graphMs = performance.now() - graphStart;
-  const edgeCount = [...graph.forward.values()].reduce((s, e) => s + e.length, 0);
-  console.log(`Module graph: ${graph.files.size} files, ${edgeCount} edges [${graphMs.toFixed(0)}ms]`);
+  const edgeCount = [...graph.forward.values()].reduce(
+    (s, e) => s + e.length,
+    0,
+  );
+  console.log(
+    `Module graph: ${graph.files.size} files, ${edgeCount} edges [${graphMs.toFixed(0)}ms]`,
+  );
   console.log("");
 
   // Start tsserver
@@ -712,20 +854,34 @@ export async function main(config?: { projectRoot: string; tsconfigPath: string 
   }
 
   const tsserverLatencies = latencyResults.filter((r) =>
-    ["ts_find_symbol", "ts_definition", "ts_references", "ts_type_info", "ts_navigate_to", "ts_module_exports"].includes(r.tool)
+    [
+      "ts_find_symbol",
+      "ts_definition",
+      "ts_references",
+      "ts_type_info",
+      "ts_navigate_to",
+      "ts_module_exports",
+    ].includes(r.tool),
   );
-  const graphLatencies = latencyResults.filter((r) => !tsserverLatencies.includes(r));
+  const graphLatencies = latencyResults.filter(
+    (r) => !tsserverLatencies.includes(r),
+  );
 
   if (tsserverLatencies.length > 0) {
-    const tsAvg = tsserverLatencies.reduce((s, r) => s + r.avg, 0) / tsserverLatencies.length;
+    const tsAvg =
+      tsserverLatencies.reduce((s, r) => s + r.avg, 0) /
+      tsserverLatencies.length;
     console.log(`Average tsserver query: ${tsAvg.toFixed(1)}ms`);
   }
   if (graphLatencies.length > 0) {
-    const graphAvg = graphLatencies.reduce((s, r) => s + r.avg, 0) / graphLatencies.length;
+    const graphAvg =
+      graphLatencies.reduce((s, r) => s + r.avg, 0) / graphLatencies.length;
     console.log(`Average graph query: ${graphAvg.toFixed(1)}ms`);
   }
 
-  console.log(`Accuracy scenarios: ${accuracyResults.filter((s) => s.verdict === "typegraph wins").length}/${accuracyResults.length} typegraph wins`);
+  console.log(
+    `Accuracy scenarios: ${accuracyResults.filter((s) => s.verdict === "typegraph wins").length}/${accuracyResults.length} typegraph wins`,
+  );
   console.log("");
 
   client.shutdown();

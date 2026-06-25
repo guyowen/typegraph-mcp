@@ -12,7 +12,7 @@ import { parseSync } from "oxc-parser";
 import type { ResolverFactory } from "oxc-resolver";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { TsServerClient } from "./tsserver-client.js";
+import type { TsServerClient } from "./src/core/tsserver/index.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 

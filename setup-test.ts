@@ -53,6 +53,10 @@ const REQUIRED_CORE_FILES = [
   "export-resolver.ts",
   "tsconfig-patch.ts",
   "disk-cache.ts",
+  "src/core/tsserver/client.ts",
+  "src/core/tsserver/index.ts",
+  "src/core/tsserver/types.ts",
+  "src/shared/config.ts",
 ];
 
 const REQUIRED_CLI_AGENTS_FILES = [

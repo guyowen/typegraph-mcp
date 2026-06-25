@@ -18,7 +18,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import type { ResolverFactory } from "oxc-resolver";
-import { TsServerClient, type NavBarItem } from "./tsserver-client.js";
+import { TsServerClient, type NavBarItem } from "./src/core/tsserver/index.js";
 import {
   buildGraph,
   startWatcher,
@@ -34,7 +34,7 @@ import {
 } from "./disk-cache.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { resolveConfig } from "./config.js";
+import { resolveConfig } from "./src/shared/config.js";
 import {
   type ToolContext,
   navigationTools,
