@@ -18,6 +18,7 @@ export default defineConfig({
     "src/core/graph/builder.ts",
     "src/core/graph/queries.ts",
     "src/shared/config.ts",
+    "src/core/index.ts",
   ],
   format: ["esm"],
   target: "node22",

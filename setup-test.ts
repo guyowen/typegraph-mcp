@@ -60,6 +60,7 @@ const REQUIRED_CORE_FILES = [
   "src/core/graph/queries.ts",
   "src/core/graph/index.ts",
   "src/core/graph/types.ts",
+  "src/core/index.ts",
   "src/shared/config.ts",
 ];
 

@@ -155,6 +155,7 @@ export function ensureTsconfigExclude(
     const excludeArrayMatch = raw.match(/("exclude"\s*:\s*\[)([\s\S]*?)(\])/);
     if (
       excludeArrayMatch &&
+      excludeArrayMatch[2] !== undefined &&
       /["']plugins(?:\/\*\*|\/\*|)["']/.test(excludeArrayMatch[2])
     ) {
       return;
