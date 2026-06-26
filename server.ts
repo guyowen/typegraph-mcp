@@ -69,10 +69,8 @@ const PREVIEW_CACHE_MAX = 500;
 function readPreview(file: string, line: number): string {
   try {
     const absPath = client.resolvePath(file);
-    const stat = fs.statSync(absPath);
     const cached = previewCache.get(absPath);
-
-    if (cached && cached.mtime === stat.mtimeMs) {
+    if (cached) {
       return cached.lines[line - 1]?.trim() ?? "";
     }
 
@@ -83,7 +81,7 @@ function readPreview(file: string, line: number): string {
       const firstKey = previewCache.keys().next().value;
       if (firstKey) previewCache.delete(firstKey);
     }
-    previewCache.set(absPath, { lines, mtime: stat.mtimeMs });
+    previewCache.set(absPath, { lines, mtime: 0 });
 
     return lines[line - 1]?.trim() ?? "";
   } catch {

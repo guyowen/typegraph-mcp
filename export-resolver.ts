@@ -215,6 +215,7 @@ export async function getModuleExports(
   file: string,
   visited = new Set<string>(),
 ): Promise<ModuleExportRecord[]> {
+  const exportCache = new Map<string, ModuleExportRecord[]>();
   const relFile = path.isAbsolute(file) ? relPathFn(file) : file;
   const absFile = normalizeExistingPath(client.resolvePath(relFile));
   if (visited.has(absFile)) return [];
@@ -262,15 +263,19 @@ export async function getModuleExports(
 
       if (importKind === "AllButDefault" && exportKind === "None") {
         if (!targetFile) continue;
-        const nestedExports = await getModuleExports(
-          client,
-          moduleResolver,
-          projectRoot,
-          relPathFn,
-          resolveProjectImportFn,
-          targetFile,
-          nextVisited,
-        );
+        let nestedExports = exportCache.get(targetFile);
+        if (!nestedExports) {
+          nestedExports = await getModuleExports(
+            client,
+            moduleResolver,
+            projectRoot,
+            relPathFn,
+            resolveProjectImportFn,
+            targetFile,
+            nextVisited,
+          );
+          exportCache.set(targetFile, nestedExports);
+        }
         for (const nested of nestedExports) {
           if (nested.symbol === "default") continue;
           const starExportKind: ModuleExportRecord["exportKind"] = entry.isType
@@ -299,17 +304,24 @@ export async function getModuleExports(
             : null;
       const nestedMatch =
         targetFile && importedSymbol
-          ? ((
-              await getModuleExports(
-                client,
-                moduleResolver,
-                projectRoot,
-                relPathFn,
-                resolveProjectImportFn,
-                targetFile,
-                nextVisited,
-              )
-            ).find((item) => item.symbol === importedSymbol) ?? null)
+          ? await (async () => {
+              let exports = exportCache.get(targetFile);
+              if (!exports) {
+                exports = await getModuleExports(
+                  client,
+                  moduleResolver,
+                  projectRoot,
+                  relPathFn,
+                  resolveProjectImportFn,
+                  targetFile,
+                  nextVisited,
+                );
+                exportCache.set(targetFile, exports);
+              }
+              return (
+                exports.find((item) => item.symbol === importedSymbol) ?? null
+              );
+            })()
           : null;
 
       const lookupLoc = offsetToLineColumn(source, exportLookupOffset(entry));
@@ -348,6 +360,13 @@ export async function getModuleExports(
       continue;
     }
 
+    const localEntries: {
+      entry: StaticExportEntry;
+      symbol: string;
+      exportLoc: { line: number; column: number };
+      lookupLoc: { line: number; column: number };
+    }[] = [];
+
     for (const entry of exp.entries) {
       const moduleRequest = (entry as { moduleRequest?: { value: string } })
         .moduleRequest;
@@ -361,14 +380,23 @@ export async function getModuleExports(
         entry.exportName.start ?? entry.localName.start ?? entry.start,
       );
       const lookupLoc = offsetToLineColumn(source, exportLookupOffset(entry));
-      const metadata = await resolveExportMetadata(
-        client,
-        relFile,
-        lookupLoc.line,
-        lookupLoc.column,
-        entry.isType ? "type" : "value",
-        projectRoot,
-      );
+      localEntries.push({ entry, symbol, exportLoc, lookupLoc });
+    }
+
+    const localResults = await Promise.all(
+      localEntries.map((e) =>
+        resolveExportMetadata(
+          client,
+          relFile,
+          e.lookupLoc.line,
+          e.lookupLoc.column,
+          e.entry.isType ? "type" : "value",
+          projectRoot,
+        ).then((metadata) => ({ ...e, metadata })),
+      ),
+    );
+
+    for (const { entry, symbol, exportLoc, metadata } of localResults) {
       const resolvedExportKind: ModuleExportRecord["exportKind"] =
         entry.isType || kindImpliesTypeOnly(metadata.kind) ? "type" : "value";
       const resolvedKind = normalizeExportKindLabel(

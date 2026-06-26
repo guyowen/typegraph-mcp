@@ -12,7 +12,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { execSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { TsServerClient, type NavBarItem } from "./src/core/tsserver/index.js";
 import { buildGraph, type ModuleGraph } from "./src/core/graph/index.js";
 import {
@@ -44,16 +44,28 @@ function grepCount(pattern: string): {
   totalBytes: number;
 } {
   try {
-    const result = execSync(
-      `grep -r --include='*.ts' --include='*.tsx' -l "${pattern}" . 2>/dev/null || true`,
-      { cwd: projectRoot, encoding: "utf-8", maxBuffer: 10 * 1024 * 1024 },
-    ).trim();
+    const listResult = spawnSync(
+      "grep",
+      ["-r", "--include=*.ts", "--include=*.tsx", "-l", pattern, "."],
+      {
+        cwd: projectRoot,
+        encoding: "utf-8",
+        stdio: ["pipe", "pipe", "ignore"],
+      },
+    );
+    const result = listResult.stdout?.trim() ?? "";
     const files = result ? result.split("\n").filter(Boolean) : [];
 
-    const countResult = execSync(
-      `grep -r --include='*.ts' --include='*.tsx' -c "${pattern}" . 2>/dev/null || true`,
-      { cwd: projectRoot, encoding: "utf-8", maxBuffer: 10 * 1024 * 1024 },
-    ).trim();
+    const countResult =
+      spawnSync(
+        "grep",
+        ["-r", "--include=*.ts", "--include=*.tsx", "-c", pattern, "."],
+        {
+          cwd: projectRoot,
+          encoding: "utf-8",
+          stdio: ["pipe", "pipe", "ignore"],
+        },
+      ).stdout?.trim() ?? "";
     const matches = countResult
       .split("\n")
       .filter(Boolean)
