@@ -5,7 +5,7 @@
  */
 
 import type { TsServerClient, NavBarItem } from "../core/tsserver/index.js";
-import type { ModuleGraph } from "../../module-graph.js";
+import type { ModuleGraph } from "../core/graph/index.js";
 import type { ResolverFactory } from "oxc-resolver";
 
 export interface ToolContext {

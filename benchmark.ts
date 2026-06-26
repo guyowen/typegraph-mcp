@@ -14,7 +14,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { execSync } from "node:child_process";
 import { TsServerClient, type NavBarItem } from "./src/core/tsserver/index.js";
-import { buildGraph, type ModuleGraph } from "./module-graph.js";
+import { buildGraph, type ModuleGraph } from "./src/core/graph/index.js";
 import {
   dependencyTree,
   dependents,
@@ -22,7 +22,7 @@ import {
   shortestPath,
   subgraph,
   moduleBoundary,
-} from "./graph-queries.js";
+} from "./src/core/graph/index.js";
 import { resolveConfig } from "./src/shared/config.js";
 
 // ─── Configuration ───────────────────────────────────────────────────────────

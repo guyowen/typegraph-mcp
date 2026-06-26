@@ -12,7 +12,7 @@ import {
   EXPORT_KINDS,
   type ModuleExportRecord,
 } from "../../export-resolver.js";
-import { resolveProjectImport } from "../../module-graph.js";
+import { resolveProjectImport } from "../core/graph/index.js";
 
 // ─── Shared Schemas ─────────────────────────────────────────────────────────
 

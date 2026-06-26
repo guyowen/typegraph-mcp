@@ -15,6 +15,8 @@ export default defineConfig({
     "export-resolver.ts",
     "tsconfig-patch.ts",
     "src/core/tsserver/client.ts",
+    "src/core/graph/builder.ts",
+    "src/core/graph/queries.ts",
     "src/shared/config.ts",
   ],
   format: ["esm"],

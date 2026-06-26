@@ -1,14 +1,13 @@
 /**
  * Graph Module
  *
- * Import/export dependency graph types.
+ * Import/export dependency graph builder + pure traversal queries.
  */
 
+// Types
+export type { ImportEdge, ModuleGraph, BuildGraphResult } from "./builder.js";
+
 export type {
-  ImportEdge,
-  ModuleGraph,
-  BuildGraphResult,
-  RawImport,
   DepTreeOpts,
   DepTreeResult,
   DependentsOpts,
@@ -20,4 +19,27 @@ export type {
   SubgraphOpts,
   SubgraphResult,
   BoundaryResult,
-} from "./types.js";
+} from "./queries.js";
+
+// Builder functions
+export {
+  discoverFiles,
+  resolveProjectImport,
+  createResolver,
+  buildForwardEdges,
+  buildGraph,
+  updateFile,
+  removeFile,
+  startWatcher,
+} from "./builder.js";
+
+// Query functions
+export {
+  dependencyTree,
+  clearPackageNameCache,
+  dependents,
+  importCycles,
+  shortestPath,
+  subgraph,
+  moduleBoundary,
+} from "./queries.js";

@@ -14,7 +14,7 @@ import {
   shortestPath,
   subgraph,
   moduleBoundary,
-} from "../../graph-queries.js";
+} from "../core/graph/index.js";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 

@@ -56,6 +56,10 @@ const REQUIRED_CORE_FILES = [
   "src/core/tsserver/client.ts",
   "src/core/tsserver/index.ts",
   "src/core/tsserver/types.ts",
+  "src/core/graph/builder.ts",
+  "src/core/graph/queries.ts",
+  "src/core/graph/index.ts",
+  "src/core/graph/types.ts",
   "src/shared/config.ts",
 ];
 

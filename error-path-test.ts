@@ -24,7 +24,7 @@ import {
   updateFile,
   buildGraph,
   type ModuleGraph,
-} from "./module-graph.js";
+} from "./src/core/graph/index.js";
 import { validateConfig, type TypegraphConfig } from "./src/shared/config.js";
 import { pathEqualsOrContains } from "./src/cli/agents/toml-helpers.js";
 

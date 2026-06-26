@@ -24,7 +24,7 @@ import {
   startWatcher,
   type ModuleGraph,
   type ImportEdge,
-} from "./module-graph.js";
+} from "./src/core/graph/index.js";
 import {
   loadDiskCache,
   validateDiskCache,
