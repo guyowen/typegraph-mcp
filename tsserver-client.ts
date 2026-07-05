@@ -90,6 +90,7 @@ export class TsServerClient {
   private shuttingDown = false;
   private restartCount = 0;
   private readonly maxRestarts = 3;
+  private projectsDirty = false;
 
   constructor(
     private readonly projectRoot: string,
@@ -323,6 +324,29 @@ export class TsServerClient {
     await new Promise((r) => setTimeout(r, 50));
   }
 
+  /**
+   * Mark tsserver's view of the disk as stale (a file changed that is NOT open
+   * in tsserver). tsserver's own disk watching silently decays in long-lived
+   * instances at monorepo scale, leaving closed-file contents frozen at project
+   * load time and new files unassigned (they land in single-file inferred
+   * projects, producing definition-only reference results). The next query
+   * forces a `reloadProjects`, which re-globs configs and re-reads closed files
+   * from disk. Open files are unaffected by design — their content is
+   * protocol-owned and refreshed via reloadOpenFile().
+   */
+  markProjectsDirty(): void {
+    this.projectsDirty = true;
+  }
+
+  private refreshIfDirty(): void {
+    if (!this.projectsDirty) return;
+    this.projectsDirty = false;
+    // reloadProjects sends no response (notRequired), so fire it as a
+    // notification; the following request queues behind the reload on
+    // tsserver's single-threaded loop.
+    this.sendNotification("reloadProjects");
+  }
+
   async reloadOpenFile(file: string): Promise<boolean> {
     const absPath = this.resolvePath(file);
     if (!this.openFiles.has(absPath)) return false;
@@ -343,6 +367,7 @@ export class TsServerClient {
   // ─── Public API ────────────────────────────────────────────────────────
 
   async definition(file: string, line: number, offset: number): Promise<DefinitionResult[]> {
+    this.refreshIfDirty();
     const absPath = this.resolvePath(file);
     await this.ensureOpen(absPath);
 
@@ -361,6 +386,7 @@ export class TsServerClient {
   }
 
   async references(file: string, line: number, offset: number): Promise<ReferenceEntry[]> {
+    this.refreshIfDirty();
     const absPath = this.resolvePath(file);
     await this.ensureOpen(absPath);
 
@@ -379,6 +405,7 @@ export class TsServerClient {
   }
 
   async quickinfo(file: string, line: number, offset: number): Promise<QuickInfoResult | null> {
+    this.refreshIfDirty();
     const absPath = this.resolvePath(file);
     await this.ensureOpen(absPath);
 
@@ -398,6 +425,7 @@ export class TsServerClient {
   }
 
   async navto(searchValue: string, maxResults = 10, file?: string): Promise<NavToItem[]> {
+    this.refreshIfDirty();
     // If a file is specified, open it first so tsserver knows about it
     if (file) await this.ensureOpen(file);
 
@@ -418,6 +446,7 @@ export class TsServerClient {
   }
 
   async navbar(file: string): Promise<NavBarItem[]> {
+    this.refreshIfDirty();
     const absPath = this.resolvePath(file);
     await this.ensureOpen(absPath);
 

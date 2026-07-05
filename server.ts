@@ -1134,11 +1134,20 @@ async function main() {
   moduleResolver = graphResult.resolver;
   startWatcher(projectRoot, moduleGraph, graphResult.resolver, {
     onFileUpdated: (filePath) =>
-      client.reloadOpenFile(filePath).catch((err) => {
-        log(`Failed to reload open file ${relPath(filePath)}:`, err);
-      }),
+      client.reloadOpenFile(filePath).then(
+        (wasOpen) => {
+          // Closed files: tsserver's own disk watching decays in long-lived
+          // instances; force a projects reload before the next query.
+          if (!wasOpen) client.markProjectsDirty();
+        },
+        (err) => {
+          client.markProjectsDirty();
+          log(`Failed to reload open file ${relPath(filePath)}:`, err);
+        }
+      ),
     onFileDeleted: (filePath) => {
       client.closeFile(filePath);
+      client.markProjectsDirty();
     },
   });
 

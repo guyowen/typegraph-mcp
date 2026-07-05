@@ -114,6 +114,12 @@ async function main(): Promise<void> {
   );
   writeFile(projectRoot, "src/test.ts", "export const oldName = 1 as const;\n");
   writeFile(projectRoot, "src/util.ts", "export const helper = 1 as const;\n");
+  writeFile(projectRoot, "src/closed.ts", "export const closedValue = 1 as const;\n");
+  writeFile(
+    projectRoot,
+    "src/closed-consumer.ts",
+    'import { closedValue } from "./closed";\nexport const observed = closedValue;\n'
+  );
 
   fs.mkdirSync(path.join(projectRoot, "node_modules"), { recursive: true });
   fs.symlinkSync(
@@ -196,6 +202,25 @@ async function main(): Promise<void> {
       assert.ok(!exportsResult.exports.some((item) => item.symbol === "oldName"));
     });
 
+    // Change a file that tsserver has not opened. The watcher should mark
+    // projects dirty so the next semantic query reloads closed-file contents.
+    writeFile(projectRoot, "src/closed.ts", "export const closedValue = 2 as const;\n");
+
+    await waitFor("closed file update to refresh semantic project state", async () => {
+      const deps = await callTool<DependencyTreeResult>("ts_dependency_tree", {
+        file: "src/closed-consumer.ts",
+      });
+      const normalizedDeps = deps.files.map(normalize);
+      assert.ok(normalizedDeps.includes("src/closed.ts"), `Expected src/closed.ts in ${normalizedDeps}`);
+
+      const typeInfo = await callTool<TypeInfoResult>("ts_type_info", {
+        file: "src/closed-consumer.ts",
+        line: 2,
+        column: 14,
+      });
+      assert.match(typeInfo.type ?? "", /\b2\b/);
+    });
+
     // Open util.ts directly so tsserver tracks it, then delete it from disk.
     const utilInfo = await callTool<TypeInfoResult>("ts_type_info", {
       file: "src/util.ts",
@@ -223,6 +248,7 @@ async function main(): Promise<void> {
     console.log("==============================");
     console.log("  ✓ import swaps keep dependency_tree and type_info aligned");
     console.log("  ✓ export renames refresh ts_module_exports semantic metadata");
+    console.log("  ✓ closed-file edits refresh tsserver project state");
     console.log("  ✓ deleted open files do not survive as tsserver ghost snapshots");
   } finally {
     await transport.close().catch(() => {});
