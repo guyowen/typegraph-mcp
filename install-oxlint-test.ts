@@ -68,16 +68,20 @@ async function main(): Promise<void> {
 
     const tsconfig = fs.readFileSync(path.join(projectRoot, "tsconfig.json"), "utf-8");
     const oxlint = fs.readFileSync(path.join(projectRoot, ".oxlintrc.json"), "utf-8");
+    const eslint = fs.readFileSync(path.join(projectRoot, "eslint.config.js"), "utf-8");
 
     assertIncludes(tsconfig, '"$schema": "http://json.schemastore.org/tsconfig"');
     assertIncludes(tsconfig, '"exclude": ["plugins/**"]');
     assertIncludes(oxlint, '"ignorePatterns": [');
     assertIncludes(oxlint, '"plugins/**"');
+    assertIncludes(eslint, 'const config = [\n  { ignores: ["plugins/**"] },');
     assert.ok(fs.existsSync(path.join(pluginRoot, "cli.ts")), "Expected installed plugin CLI");
 
     assertIncludes(setupOutput, 'Added "plugins/**" to tsconfig.json exclude');
     assertIncludes(setupOutput, 'Added "plugins/**" to .oxlintrc.json ignorePatterns');
+    assertIncludes(setupOutput, 'Added "plugins/**" to eslint.config.js ignores');
     assertIncludes(setupOutput, "Oxlint ignores plugins/ (.oxlintrc.json)");
+    assertIncludes(setupOutput, "ESLint ignores plugins/ (eslint.config.js)");
 
     const checkOutput = runTsx(
       pluginRoot,
@@ -86,6 +90,7 @@ async function main(): Promise<void> {
       testEnv
     );
     assertIncludes(checkOutput, "Oxlint ignores plugins/ (.oxlintrc.json)");
+    assertIncludes(checkOutput, "ESLint ignores plugins/ (eslint.config.js)");
     assert.ok(
       !checkOutput.includes("Lint config check (no ESLint or Oxlint config found)"),
       `Did not expect lint config detection to be skipped:\n${checkOutput}`
@@ -97,7 +102,9 @@ async function main(): Promise<void> {
     console.log("  ✓ tsconfig schema URL preserved during exclude patch");
     console.log("  ✓ tsconfig exclude patch ignores unrelated plugins text");
     console.log("  ✓ .oxlintrc.json patched with plugins ignore");
+    console.log("  ✓ eslint.config.js named flat-config array patched with plugins ignore");
     console.log("  ✓ installed plugin health check recognizes Oxlint config");
+    console.log("  ✓ installed plugin health check recognizes ESLint config");
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }

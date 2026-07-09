@@ -815,6 +815,24 @@ function patchEslintConfig(raw: string): string | null {
     return raw.replace(exportArrayRe, (match) => `${match}  { ignores: ["plugins/**"] },\n`);
   }
 
+  // Matches common flat-config shape:
+  //   const config = [
+  //     ...
+  //   ];
+  //   export default config;
+  const variableArrayRe = /((?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*\[)\s*\n?/g;
+  for (const variableArrayMatch of raw.matchAll(variableArrayRe)) {
+    const [, open, variableName] = variableArrayMatch;
+    const escapedName = variableName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const exportDefaultRe = new RegExp(`export\\s+default\\s+${escapedName}\\s*;?`);
+
+    if (exportDefaultRe.test(raw)) {
+      return `${raw.slice(0, variableArrayMatch.index)}${open}\n  { ignores: ["plugins/**"] },\n${raw.slice(
+        (variableArrayMatch.index ?? 0) + variableArrayMatch[0].length
+      )}`;
+    }
+  }
+
   return null;
 }
 
