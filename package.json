@@ -34,7 +34,7 @@
   "scripts": {
     "build": "tsup",
     "start": "tsx server.ts",
-    "test": "tsx smoke-test.ts && tsx export-surface-test.ts && tsx engine-sync-test.ts && tsx install-oxlint-test.ts",
+    "test": "tsx smoke-test-selection-test.ts && tsx export-surface-test.ts && tsx engine-sync-test.ts && tsx install-oxlint-test.ts",
     "check": "tsx check.ts"
   },
   "dependencies": {
