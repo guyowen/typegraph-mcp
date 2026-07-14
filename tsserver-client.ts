@@ -80,6 +80,43 @@ interface PendingRequest {
   command: string;
 }
 
+export interface TsServerResolution {
+  path: string;
+  version: string;
+  source: "project" | "typegraph";
+  projectVersion?: string;
+}
+
+function readPackageVersion(packagePath: string): string {
+  const pkg = JSON.parse(fs.readFileSync(packagePath, "utf-8")) as { version?: string };
+  return pkg.version ?? "unknown";
+}
+
+/** Resolve legacy tsserver, falling back when the project uses TypeScript 7's LSP runtime. */
+export function resolveTsServer(projectRoot: string): TsServerResolution {
+  const projectRequire = createRequire(path.resolve(projectRoot, "package.json"));
+  let projectVersion: string | undefined;
+
+  try {
+    const packagePath = projectRequire.resolve("typescript/package.json");
+    projectVersion = readPackageVersion(packagePath);
+    const serverPath = projectRequire.resolve("typescript/lib/tsserver.js");
+    return { path: serverPath, version: projectVersion, source: "project" };
+  } catch {
+    // TypeScript 7 is installed without the legacy tsserver entrypoint.
+  }
+
+  const toolRequire = createRequire(import.meta.url);
+  const packagePath = toolRequire.resolve("typescript/package.json");
+  const serverPath = toolRequire.resolve("typescript/lib/tsserver.js");
+  return {
+    path: serverPath,
+    version: readPackageVersion(packagePath),
+    source: "typegraph",
+    projectVersion,
+  };
+}
+
 export class TsServerClient {
   private child: ChildProcess | null = null;
   private seq = 0;
@@ -124,11 +161,15 @@ export class TsServerClient {
   async start(): Promise<void> {
     if (this.child) return;
 
-    // Resolve tsserver from the TARGET project's node_modules, not the MCP server's
-    const require = createRequire(path.resolve(this.projectRoot, "package.json"));
-    const tsserverPath = require.resolve("typescript/lib/tsserver.js");
+    const resolution = resolveTsServer(this.projectRoot);
+    const tsserverPath = resolution.path;
 
-    log(`Spawning tsserver: ${tsserverPath}`);
+    const fallbackNote = resolution.projectVersion
+      ? `; project TypeScript ${resolution.projectVersion} has no legacy tsserver`
+      : "";
+    log(
+      `Spawning tsserver: ${tsserverPath} (TypeScript ${resolution.version}, ${resolution.source}${fallbackNote})`
+    );
     log(`Project root: ${this.projectRoot}`);
     log(`tsconfig: ${this.tsconfigPath}`);
 

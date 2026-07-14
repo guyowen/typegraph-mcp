@@ -14,6 +14,8 @@ import * as path from "node:path";
 import { createRequire } from "node:module";
 import { spawn, spawnSync } from "node:child_process";
 import { resolveConfig, type TypegraphConfig } from "./config.js";
+import { resolveTsServer, type TsServerResolution } from "./tsserver-client.js";
+import { BIOME_CONFIG_NAMES, biomeScopeExcludes } from "./biome-config.js";
 
 // ─── Result Type ─────────────────────────────────────────────────────────────
 
@@ -47,18 +49,9 @@ function findFirstTsFile(dir: string): string | null {
 }
 
 /** Spawn tsserver, send configure, verify response, shut down */
-function testTsserver(projectRoot: string): Promise<boolean> {
+function testTsserver(projectRoot: string, resolution: TsServerResolution): Promise<boolean> {
   return new Promise((resolve) => {
-    let tsserverPath: string;
-    try {
-      const require = createRequire(path.resolve(projectRoot, "package.json"));
-      tsserverPath = require.resolve("typescript/lib/tsserver.js");
-    } catch {
-      resolve(false);
-      return;
-    }
-
-    const child = spawn("node", [tsserverPath, "--disableAutomaticTypingAcquisition"], {
+    const child = spawn("node", [resolution.path, "--disableAutomaticTypingAcquisition"], {
       cwd: projectRoot,
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -228,45 +221,6 @@ function findAntigravityRegistration(projectRoot: string): string | null {
   return null;
 }
 
-function readProjectPackageJson(projectRoot: string): Record<string, unknown> | null {
-  const packageJsonPath = path.resolve(projectRoot, "package.json");
-  if (!fs.existsSync(packageJsonPath)) return null;
-
-  try {
-    return JSON.parse(fs.readFileSync(packageJsonPath, "utf-8")) as Record<string, unknown>;
-  } catch {
-    return null;
-  }
-}
-
-function getProjectInstallCommand(projectRoot: string, packageJson: Record<string, unknown> | null): string {
-  const packageManager = typeof packageJson?.["packageManager"] === "string"
-    ? packageJson["packageManager"]
-    : "";
-
-  if (packageManager.startsWith("pnpm@") || fs.existsSync(path.join(projectRoot, "pnpm-lock.yaml"))) {
-    return "pnpm install";
-  }
-  if (packageManager.startsWith("yarn@") || fs.existsSync(path.join(projectRoot, "yarn.lock"))) {
-    return "yarn install";
-  }
-  return "npm install";
-}
-
-function hasDeclaredDependency(packageJson: Record<string, unknown> | null, packageName: string): boolean {
-  const depKeys = [
-    "dependencies",
-    "devDependencies",
-    "peerDependencies",
-    "optionalDependencies",
-  ] as const;
-
-  return depKeys.some((key) => {
-    const deps = packageJson?.[key];
-    return typeof deps === "object" && deps !== null && packageName in deps;
-  });
-}
-
 const ESLINT_CONFIG_NAMES = [
   "eslint.config.mjs",
   "eslint.config.js",
@@ -283,7 +237,8 @@ const OXLINT_CONFIG_NAMES = [
 
 type LintConfigCheck =
   | { tool: "ESLint"; fileName: string; fullPath: string; propertyName: "ignores" }
-  | { tool: "Oxlint"; fileName: string; fullPath: string; propertyName: "ignorePatterns" };
+  | { tool: "Oxlint"; fileName: string; fullPath: string; propertyName: "ignorePatterns" }
+  | { tool: "Biome"; fileName: string; fullPath: string; propertyName: "files.includes" };
 
 function findLintConfigs(projectRoot: string): LintConfigCheck[] {
   const configs: LintConfigCheck[] = [];
@@ -302,6 +257,14 @@ function findLintConfigs(projectRoot: string): LintConfigCheck[] {
     }
   }
 
+  for (const fileName of BIOME_CONFIG_NAMES) {
+    const fullPath = path.resolve(projectRoot, fileName);
+    if (fs.existsSync(fullPath)) {
+      configs.push({ tool: "Biome", fileName, fullPath, propertyName: "files.includes" });
+      break;
+    }
+  }
+
   return configs;
 }
 
@@ -314,8 +277,6 @@ export async function main(configOverride?: TypegraphConfig): Promise<CheckResul
   let passed = 0;
   let failed = 0;
   let warned = 0;
-  const projectPackageJson = readProjectPackageJson(projectRoot);
-  const installCommand = getProjectInstallCommand(projectRoot, projectPackageJson);
 
   function pass(msg: string): void {
     console.log(`  \u2713 ${msg}`);
@@ -363,24 +324,23 @@ export async function main(configOverride?: TypegraphConfig): Promise<CheckResul
     pass("tsx available (via npx/global)");
   }
 
-  // 3. TypeScript in project
-  let tsVersion: string | null = null;
+  // 3. Compatible tsserver runtime
+  let tsResolution: TsServerResolution | null = null;
   try {
-    const require = createRequire(path.resolve(projectRoot, "package.json"));
-    const tsserverPath = require.resolve("typescript/lib/tsserver.js");
-    const tsPkgPath = path.resolve(path.dirname(tsserverPath), "..", "package.json");
-    const tsPkg = JSON.parse(fs.readFileSync(tsPkgPath, "utf-8"));
-    tsVersion = tsPkg.version;
-    pass(`TypeScript found (v${tsVersion})`);
+    tsResolution = resolveTsServer(projectRoot);
+    if (tsResolution.source === "project") {
+      pass(`TypeScript found (v${tsResolution.version})`);
+    } else if (tsResolution.projectVersion) {
+      pass(
+        `Compatible tsserver found (TypeScript v${tsResolution.version} tool runtime; project uses v${tsResolution.projectVersion})`
+      );
+    } else {
+      pass(`TypeScript found in typegraph-mcp (v${tsResolution.version})`);
+    }
   } catch {
-    const hasDeclaredTs = hasDeclaredDependency(projectPackageJson, "typescript");
     fail(
-      hasDeclaredTs
-        ? "TypeScript is declared but not installed in project"
-        : "TypeScript not found in project",
-      hasDeclaredTs
-        ? `Run \`${installCommand}\` to install project dependencies`
-        : `Add \`typescript\` to devDependencies and run \`${installCommand}\``
+      "Compatible tsserver runtime not found",
+      `Run \`cd ${toolRelPath} && npm install --include=optional\``
     );
   }
 
@@ -501,7 +461,13 @@ export async function main(configOverride?: TypegraphConfig): Promise<CheckResul
   // 6. typegraph-mcp dependencies installed
   const toolNodeModules = path.join(toolDir, "node_modules");
   if (fs.existsSync(toolNodeModules)) {
-    const requiredPkgs = ["@modelcontextprotocol/sdk", "oxc-parser", "oxc-resolver", "zod"];
+    const requiredPkgs = [
+      "@modelcontextprotocol/sdk",
+      "oxc-parser",
+      "oxc-resolver",
+      "typescript",
+      "zod",
+    ];
     const missing = requiredPkgs.filter(
       (pkg) => !fs.existsSync(path.join(toolNodeModules, ...pkg.split("/")))
     );
@@ -569,9 +535,9 @@ export async function main(configOverride?: TypegraphConfig): Promise<CheckResul
   }
 
   // 9. tsserver startup test
-  if (tsVersion) {
+  if (tsResolution) {
     try {
-      const ok = await testTsserver(projectRoot);
+      const ok = await testTsserver(projectRoot, tsResolution);
       if (ok) {
         pass("tsserver responds to configure");
       } else {
@@ -636,19 +602,23 @@ export async function main(configOverride?: TypegraphConfig): Promise<CheckResul
 
       for (const config of lintConfigs) {
         const content = fs.readFileSync(config.fullPath, "utf-8");
-        const hasParentIgnore = parentIgnorePattern.test(content);
+        const hasParentIgnore =
+          config.tool === "Biome"
+            ? biomeScopeExcludes(content, parentDir)
+            : parentIgnorePattern.test(content);
 
         if (hasParentIgnore) {
           pass(`${config.tool} ignores ${parentDir}/ (${config.fileName})`);
         } else {
+          const expectedPattern = config.tool === "Biome" ? `!!${parentDir}` : `${parentDir}/**`;
           fail(
-            `${config.tool} missing ignore: "${parentDir}/**" (${config.fileName})`,
-            `Add to ${config.propertyName} in ${config.fileName}:\n    "${parentDir}/**",`
+            `${config.tool} missing ignore: "${expectedPattern}" (${config.fileName})`,
+            `Add to ${config.propertyName} in ${config.fileName}:\n    "${expectedPattern}",`
           );
         }
       }
     } else {
-      skip("Lint config check (no ESLint or Oxlint config found)");
+      skip("Lint config check (no ESLint, Oxlint, or Biome config found)");
     }
   } else {
     skip("Lint config check (typegraph-mcp is external to project)");

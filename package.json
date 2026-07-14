@@ -34,7 +34,7 @@
   "scripts": {
     "build": "tsup",
     "start": "tsx server.ts",
-    "test": "tsx smoke-test-selection-test.ts && tsx export-surface-test.ts && tsx engine-sync-test.ts && tsx install-oxlint-test.ts",
+    "test": "tsx smoke-test-selection-test.ts && tsx biome-config-test.ts && tsx tsserver-resolution-test.ts && tsx export-surface-test.ts && tsx engine-sync-test.ts && tsx install-oxlint-test.ts",
     "check": "tsx check.ts"
   },
   "dependencies": {
@@ -42,12 +42,12 @@
     "@modelcontextprotocol/sdk": "^1.26.0",
     "oxc-parser": "^0.114.0",
     "oxc-resolver": "^11.17.1",
+    "typescript": "^5.9.3",
     "zod": "^4.3.6"
   },
   "devDependencies": {
     "@types/node": "^25.3.0",
     "tsup": "^8.5.0",
-    "tsx": "^4.21.0",
-    "typescript": "^5.8.0"
+    "tsx": "^4.21.0"
   }
 }

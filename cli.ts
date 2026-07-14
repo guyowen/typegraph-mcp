@@ -18,6 +18,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { execSync } from "node:child_process";
 import * as p from "@clack/prompts";
+import { BIOME_CONFIG_NAMES, biomeScopeExcludes, patchBiomeConfig } from "./biome-config.js";
 import { resolveConfig } from "./config.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -141,6 +142,7 @@ const AGENTS: Record<AgentId, AgentDef> = {
 /** Core files always installed (server, modules, config, package manifest) */
 const CORE_FILES = [
   "server.ts",
+  "biome-config.ts",
   "module-graph.ts",
   "tsserver-client.ts",
   "graph-queries.ts",
@@ -761,7 +763,8 @@ const OXLINT_CONFIG_NAMES = [
 
 type LintConfig =
   | { tool: "ESLint"; fileName: string; fullPath: string; format: "flat" }
-  | { tool: "Oxlint"; fileName: string; fullPath: string; format: "json" | "module" };
+  | { tool: "Oxlint"; fileName: string; fullPath: string; format: "json" | "module" }
+  | { tool: "Biome"; fileName: string; fullPath: string; format: "json" };
 
 function findLintConfigs(projectRoot: string): LintConfig[] {
   const configs: LintConfig[] = [];
@@ -782,6 +785,14 @@ function findLintConfigs(projectRoot: string): LintConfig[] {
         fullPath,
         format: fileName.endsWith(".json") ? "json" : "module",
       });
+    }
+  }
+
+  for (const fileName of BIOME_CONFIG_NAMES) {
+    const fullPath = path.resolve(projectRoot, fileName);
+    if (fs.existsSync(fullPath)) {
+      configs.push({ tool: "Biome", fileName, fullPath, format: "json" });
+      break;
     }
   }
 
@@ -862,34 +873,51 @@ function patchOxlintModuleConfig(raw: string): string | null {
   return null;
 }
 
+function lintPropertyName(config: LintConfig): string {
+  if (config.tool === "ESLint") return "ignores";
+  if (config.tool === "Oxlint") return "ignorePatterns";
+  return "files.includes";
+}
+
 function ensureLintIgnores(projectRoot: string): void {
   const configs = findLintConfigs(projectRoot);
   for (const config of configs) {
     try {
       const raw = fs.readFileSync(config.fullPath, "utf-8");
-      if (/["']plugins\/\*\*["']/.test(raw)) continue;
+      if (
+        config.tool === "Biome"
+          ? biomeScopeExcludes(raw, "plugins")
+          : /["']plugins\/\*\*["']/.test(raw)
+      ) {
+        continue;
+      }
 
       const updated =
         config.tool === "ESLint"
           ? patchEslintConfig(raw)
+          : config.tool === "Biome"
+            ? patchBiomeConfig(raw, "plugins")
           : config.format === "json"
             ? patchOxlintJsonConfig(raw)
             : patchOxlintModuleConfig(raw);
 
       if (updated) {
         fs.writeFileSync(config.fullPath, updated);
-        const propertyName = config.tool === "ESLint" ? "ignores" : "ignorePatterns";
-        p.log.success(`Added "plugins/**" to ${config.fileName} ${propertyName}`);
+        const propertyName = lintPropertyName(config);
+        const ignorePattern = config.tool === "Biome" ? "!!plugins" : "plugins/**";
+        p.log.success(`Added "${ignorePattern}" to ${config.fileName} ${propertyName}`);
       } else {
-        const propertyName = config.tool === "ESLint" ? "ignores" : "ignorePatterns";
+        const propertyName = lintPropertyName(config);
+        const ignorePattern = config.tool === "Biome" ? "!!plugins" : "plugins/**";
         p.log.warn(
-          `Could not patch ${config.fileName} — manually add "plugins/**" to ${propertyName}`
+          `Could not patch ${config.fileName} — manually add "${ignorePattern}" to ${propertyName}`
         );
       }
     } catch {
-      const propertyName = config.tool === "ESLint" ? "ignores" : "ignorePatterns";
+      const propertyName = lintPropertyName(config);
+      const ignorePattern = config.tool === "Biome" ? "!!plugins" : "plugins/**";
       p.log.warn(
-        `Could not update ${config.fileName} — manually add "plugins/**" to ${propertyName}`
+        `Could not update ${config.fileName} — manually add "${ignorePattern}" to ${propertyName}`
       );
     }
   }

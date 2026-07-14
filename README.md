@@ -87,7 +87,7 @@ First query takes ~2s (tsserver warmup). Subsequent queries: 1-60ms.
 ## Requirements
 
 - **Node.js** >= 22
-- **TypeScript** >= 5.0 in the target project
+- A TypeScript project with `tsconfig.json` (TypeGraph carries a compatible tsserver runtime for TypeScript 7 projects)
 - **npm** for dependency installation
 
 ## Tools
@@ -146,7 +146,7 @@ npx typegraph-mcp check
 | Symptom | Fix |
 |---|---|
 | Server won't start | `cd plugins/typegraph-mcp && npm install --include=optional` |
-| "TypeScript not found" | Run `pnpm install` or `npm install`; if TypeScript is not declared, add it to devDependencies first |
+| "Compatible tsserver not found" | Reinstall the plugin dependencies; TypeGraph uses the project's legacy tsserver when available and its bundled TypeScript 5 runtime for TypeScript 7 projects |
 | Tools return empty results | Check `TYPEGRAPH_TSCONFIG` points to the right tsconfig |
 | Build errors from plugins/ | Add `"plugins/**"` to tsconfig.json `exclude` array |
 | `@esbuild/*` or `@rollup/*` package missing | Reinstall with Node 22: `npm install --include=optional` |

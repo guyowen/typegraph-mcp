@@ -69,19 +69,23 @@ async function main(): Promise<void> {
     const tsconfig = fs.readFileSync(path.join(projectRoot, "tsconfig.json"), "utf-8");
     const oxlint = fs.readFileSync(path.join(projectRoot, ".oxlintrc.json"), "utf-8");
     const eslint = fs.readFileSync(path.join(projectRoot, "eslint.config.js"), "utf-8");
+    const biome = fs.readFileSync(path.join(projectRoot, "biome.json"), "utf-8");
 
     assertIncludes(tsconfig, '"$schema": "http://json.schemastore.org/tsconfig"');
     assertIncludes(tsconfig, '"exclude": ["plugins/**"]');
     assertIncludes(oxlint, '"ignorePatterns": [');
     assertIncludes(oxlint, '"plugins/**"');
     assertIncludes(eslint, 'const config = [\n  { ignores: ["plugins/**"] },');
+    assertIncludes(biome, '"!!plugins"');
     assert.ok(fs.existsSync(path.join(pluginRoot, "cli.ts")), "Expected installed plugin CLI");
 
     assertIncludes(setupOutput, 'Added "plugins/**" to tsconfig.json exclude');
     assertIncludes(setupOutput, 'Added "plugins/**" to .oxlintrc.json ignorePatterns');
     assertIncludes(setupOutput, 'Added "plugins/**" to eslint.config.js ignores');
+    assertIncludes(setupOutput, 'Added "!!plugins" to biome.json files.includes');
     assertIncludes(setupOutput, "Oxlint ignores plugins/ (.oxlintrc.json)");
     assertIncludes(setupOutput, "ESLint ignores plugins/ (eslint.config.js)");
+    assertIncludes(setupOutput, "Biome ignores plugins/ (biome.json)");
 
     const checkOutput = runTsx(
       pluginRoot,
@@ -91,9 +95,54 @@ async function main(): Promise<void> {
     );
     assertIncludes(checkOutput, "Oxlint ignores plugins/ (.oxlintrc.json)");
     assertIncludes(checkOutput, "ESLint ignores plugins/ (eslint.config.js)");
+    assertIncludes(checkOutput, "Biome ignores plugins/ (biome.json)");
     assert.ok(
-      !checkOutput.includes("Lint config check (no ESLint or Oxlint config found)"),
+      !checkOutput.includes("Lint config check (no ESLint, Oxlint, or Biome config found)"),
       `Did not expect lint config detection to be skipped:\n${checkOutput}`
+    );
+
+    const scopedProjectRoot = path.join(tempRoot, "scoped-project");
+    fs.mkdirSync(path.join(scopedProjectRoot, "src"), { recursive: true });
+    fs.writeFileSync(
+      path.join(scopedProjectRoot, "package.json"),
+      JSON.stringify({ name: "biome-scoped-fixture", private: true, type: "module" }, null, 2)
+    );
+    fs.writeFileSync(
+      path.join(scopedProjectRoot, "tsconfig.json"),
+      JSON.stringify({ compilerOptions: { strict: true }, include: ["src/**/*.ts"] }, null, 2)
+    );
+    fs.writeFileSync(path.join(scopedProjectRoot, "src/index.ts"), "export const value = 1;\n");
+    const scopedBiome = JSON.stringify(
+      {
+        $schema: "https://biomejs.dev/schemas/2.5.3/schema.json",
+        files: { includes: ["src/**/*", "*.config.ts"] },
+        linter: { enabled: true },
+      },
+      null,
+      2
+    );
+    fs.writeFileSync(path.join(scopedProjectRoot, "biome.json"), `${scopedBiome}\n`);
+    fs.mkdirSync(path.join(scopedProjectRoot, "node_modules"), { recursive: true });
+    fs.symlinkSync(
+      path.join(repoRoot, "node_modules/typescript"),
+      path.join(scopedProjectRoot, "node_modules/typescript"),
+      "dir"
+    );
+
+    const scopedSetupOutput = runTsx(
+      repoRoot,
+      [path.join(repoRoot, "cli.ts"), "setup", "--yes"],
+      scopedProjectRoot,
+      testEnv
+    );
+    assert.equal(
+      fs.readFileSync(path.join(scopedProjectRoot, "biome.json"), "utf-8"),
+      `${scopedBiome}\n`
+    );
+    assertIncludes(scopedSetupOutput, "Biome ignores plugins/ (biome.json)");
+    assert.ok(
+      !scopedSetupOutput.includes('Added "!!plugins" to biome.json'),
+      `Did not expect narrow Biome scope to be patched:\n${scopedSetupOutput}`
     );
 
     console.log("");
@@ -103,8 +152,11 @@ async function main(): Promise<void> {
     console.log("  ✓ tsconfig exclude patch ignores unrelated plugins text");
     console.log("  ✓ .oxlintrc.json patched with plugins ignore");
     console.log("  ✓ eslint.config.js named flat-config array patched with plugins ignore");
+    console.log("  ✓ broad Biome files.includes patched with plugins force-ignore");
+    console.log("  ✓ narrow Biome files.includes recognized without modification");
     console.log("  ✓ installed plugin health check recognizes Oxlint config");
     console.log("  ✓ installed plugin health check recognizes ESLint config");
+    console.log("  ✓ installed plugin health check recognizes Biome config");
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }
