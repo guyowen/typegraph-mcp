@@ -702,49 +702,6 @@ function deregisterAntigravityMcp(projectRoot: string): void {
   }
 }
 
-// ─── TSConfig Exclude ─────────────────────────────────────────────────────────
-
-function ensureTsconfigExclude(projectRoot: string): void {
-  const tsconfigPath = path.resolve(projectRoot, "tsconfig.json");
-  if (!fs.existsSync(tsconfigPath)) return;
-
-  try {
-    const raw = fs.readFileSync(tsconfigPath, "utf-8");
-    const excludeArrayMatch = raw.match(/("exclude"\s*:\s*\[)([\s\S]*?)(\])/);
-    if (excludeArrayMatch && /["']plugins(?:\/\*\*|\/\*|)["']/.test(excludeArrayMatch[2])) {
-      return;
-    }
-
-    // Insert "plugins/**" into the exclude array in the original file
-    if (excludeArrayMatch) {
-      // Existing exclude array — append to it
-      const updated = raw.replace(
-        /("exclude"\s*:\s*\[)([\s\S]*?)(\])/,
-        (_match, open, items, close) => {
-          const trimmed = items.trimEnd();
-          const needsComma = trimmed.length > 0 && !trimmed.endsWith(",");
-          return `${open}${items.trimEnd()}${needsComma ? "," : ""}\n    "plugins/**"${close}`;
-        }
-      );
-      fs.writeFileSync(tsconfigPath, updated);
-    } else {
-      // No exclude field — add one before the closing brace
-      const lastBrace = raw.lastIndexOf("}");
-      if (lastBrace !== -1) {
-        const before = raw.slice(0, lastBrace).trimEnd();
-        const needsComma = !before.endsWith(",") && !before.endsWith("{");
-        const patched = `${before}${needsComma ? "," : ""}\n  "exclude": ["plugins/**"]\n}\n`;
-        fs.writeFileSync(tsconfigPath, patched);
-      }
-    }
-
-    p.log.success('Added "plugins/**" to tsconfig.json exclude (prevents build errors)');
-  } catch {
-    // Don't fail setup over tsconfig parsing issues
-    p.log.warn('Could not update tsconfig.json — manually add "plugins/**" to the exclude array to prevent build errors');
-  }
-}
-
 // ─── Lint Ignore ─────────────────────────────────────────────────────────────
 
 const ESLINT_CONFIG_NAMES = [
@@ -985,12 +942,12 @@ async function setup(yes: boolean): Promise<void> {
     process.exit(1);
   }
 
-  if (!fs.existsSync(tsconfigPath)) {
-    p.cancel("No tsconfig.json found. typegraph-mcp requires a TypeScript project.");
-    process.exit(1);
+  if (fs.existsSync(tsconfigPath)) {
+    p.log.success("Found package.json and tsconfig.json");
+  } else {
+    p.log.success("Found package.json");
+    p.log.info("No tsconfig.json found; semantic tools will use an inferred TypeScript project");
   }
-
-  p.log.success("Found package.json and tsconfig.json");
 
   // 2. Check for existing installation
   const targetDir = path.resolve(projectRoot, PLUGIN_DIR_NAME);
@@ -1153,13 +1110,10 @@ async function setup(yes: boolean): Promise<void> {
   // 7. Register MCP server in agent-specific configs
   registerMcpServers(projectRoot, selectedAgents);
 
-  // 8. Ensure plugins/ is excluded from tsconfig
-  ensureTsconfigExclude(projectRoot);
-
-  // 9. Ensure plugins/ is ignored by supported lint configs
+  // 8. Ensure plugins/ is ignored by supported lint configs
   ensureLintIgnores(projectRoot);
 
-  // 10. Verification
+  // 9. Verification
   await runVerification(targetDir, selectedAgents);
 }
 
@@ -1411,7 +1365,6 @@ const args = process.argv.slice(2);
 const command = args.find((a) => !a.startsWith("-"));
 const yes = args.includes("--yes") || args.includes("-y");
 const help = args.includes("--help") || args.includes("-h");
-
 // Clear npx download noise (warnings, "Ok to proceed?" prompt)
 process.stdout.write("\x1Bc");
 

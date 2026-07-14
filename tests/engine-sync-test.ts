@@ -69,7 +69,7 @@ function writeFile(root: string, relativePath: string, content: string): void {
 }
 
 async function main(): Promise<void> {
-  const repoRoot = import.meta.dirname;
+  const repoRoot = path.resolve(import.meta.dirname, "..");
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "typegraph-engine-sync-"));
   const projectRoot = path.join(tempRoot, "project");
 

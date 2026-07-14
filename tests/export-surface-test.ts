@@ -67,7 +67,7 @@ function assertProjectPath(actual: string | null, expected: string): void {
 }
 
 async function main(): Promise<void> {
-  const repoRoot = import.meta.dirname;
+  const repoRoot = path.resolve(import.meta.dirname, "..");
   const fixtureRoot = path.join(repoRoot, ".fixtures/export-surface");
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "typegraph-export-surface-"));
   const projectRoot = path.join(tempRoot, "project");

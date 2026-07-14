@@ -5,6 +5,7 @@ import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { buildGraph } from "../module-graph.js";
 
 function copyDir(src: string, dest: string): void {
   fs.mkdirSync(dest, { recursive: true });
@@ -41,7 +42,7 @@ function assertIncludes(text: string, expected: string): void {
 }
 
 async function main(): Promise<void> {
-  const repoRoot = import.meta.dirname;
+  const repoRoot = path.resolve(import.meta.dirname, "..");
   const fixtureRoot = path.join(repoRoot, ".fixtures/install-oxlint");
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "typegraph-install-oxlint-"));
   const projectRoot = path.join(tempRoot, "project");
@@ -72,14 +73,19 @@ async function main(): Promise<void> {
     const biome = fs.readFileSync(path.join(projectRoot, "biome.json"), "utf-8");
 
     assertIncludes(tsconfig, '"$schema": "http://json.schemastore.org/tsconfig"');
-    assertIncludes(tsconfig, '"exclude": ["plugins/**"]');
+    assert.ok(!tsconfig.includes('"exclude"'), "Expected setup to leave tsconfig unchanged");
     assertIncludes(oxlint, '"ignorePatterns": [');
     assertIncludes(oxlint, '"plugins/**"');
     assertIncludes(eslint, 'const config = [\n  { ignores: ["plugins/**"] },');
     assertIncludes(biome, '"!!plugins"');
     assert.ok(fs.existsSync(path.join(pluginRoot, "cli.ts")), "Expected installed plugin CLI");
 
-    assertIncludes(setupOutput, 'Added "plugins/**" to tsconfig.json exclude');
+    const installedGraph = await buildGraph(projectRoot, "./tsconfig.json", [pluginRoot]);
+    assert.ok(
+      [...installedGraph.graph.files].every((file) => !file.startsWith(pluginRoot + path.sep)),
+      "Expected the installed plugin subtree to be excluded from the graph"
+    );
+
     assertIncludes(setupOutput, 'Added "plugins/**" to .oxlintrc.json ignorePatterns');
     assertIncludes(setupOutput, 'Added "plugins/**" to eslint.config.js ignores');
     assertIncludes(setupOutput, 'Added "!!plugins" to biome.json files.includes');
@@ -145,15 +151,69 @@ async function main(): Promise<void> {
       `Did not expect narrow Biome scope to be patched:\n${scopedSetupOutput}`
     );
 
+    const inferredProjectRoot = path.join(tempRoot, "inferred-project");
+    fs.mkdirSync(path.join(inferredProjectRoot, "src"), { recursive: true });
+    fs.writeFileSync(
+      path.join(inferredProjectRoot, "package.json"),
+      JSON.stringify({ name: "inferred-project-fixture", private: true, type: "module" }, null, 2)
+    );
+    fs.writeFileSync(
+      path.join(inferredProjectRoot, "src/dependency.ts"),
+      "export const dependencyValue = 1;\n"
+    );
+    fs.writeFileSync(
+      path.join(inferredProjectRoot, "src/service.ts"),
+      [
+        'import { dependencyValue } from "./dependency.js";',
+        "",
+        "export interface ServiceResult {",
+        "  readonly value: number;",
+        "  readonly source: string;",
+        "}",
+        "",
+        "export function createService(value: number): ServiceResult {",
+        '  return { value: value + dependencyValue, source: "inferred fixture" };',
+        "}",
+        "",
+      ].join("\n")
+    );
+    fs.mkdirSync(path.join(inferredProjectRoot, "node_modules"), { recursive: true });
+    fs.symlinkSync(
+      path.join(repoRoot, "node_modules/typescript"),
+      path.join(inferredProjectRoot, "node_modules/typescript"),
+      "dir"
+    );
+
+    const inferredSetupOutput = runTsx(
+      repoRoot,
+      [path.join(repoRoot, "cli.ts"), "setup", "--yes"],
+      inferredProjectRoot,
+      testEnv
+    );
+    assert.ok(
+      !fs.existsSync(path.join(inferredProjectRoot, "tsconfig.json")),
+      "Expected setup not to create tsconfig.json"
+    );
+    assertIncludes(
+      inferredSetupOutput,
+      "No tsconfig.json found; semantic tools will use an inferred TypeScript project"
+    );
+    assertIncludes(
+      inferredSetupOutput,
+      "No tsconfig.json; semantic tools will use an inferred TypeScript project"
+    );
+    assertIncludes(inferredSetupOutput, "Setup complete!");
+
     console.log("");
     console.log("typegraph-mcp Install Oxlint Test");
     console.log("=================================");
-    console.log("  ✓ tsconfig schema URL preserved during exclude patch");
-    console.log("  ✓ tsconfig exclude patch ignores unrelated plugins text");
+    console.log("  ✓ tsconfig left unchanged");
     console.log("  ✓ .oxlintrc.json patched with plugins ignore");
     console.log("  ✓ eslint.config.js named flat-config array patched with plugins ignore");
     console.log("  ✓ broad Biome files.includes patched with plugins force-ignore");
     console.log("  ✓ narrow Biome files.includes recognized without modification");
+    console.log("  ✓ embedded plugin subtree excluded from graph discovery");
+    console.log("  ✓ setup works without creating tsconfig.json");
     console.log("  ✓ installed plugin health check recognizes Oxlint config");
     console.log("  ✓ installed plugin health check recognizes ESLint config");
     console.log("  ✓ installed plugin health check recognizes Biome config");

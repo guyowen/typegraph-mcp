@@ -55,8 +55,22 @@ const SKIP_FILES = new Set(["routeTree.gen.ts"]);
 
 // ─── File Discovery ──────────────────────────────────────────────────────────
 
-export function discoverFiles(rootDir: string): string[] {
+function normalizeExcludedPaths(rootDir: string, excludedPaths: string[]): string[] {
+  return excludedPaths.map((excludedPath) =>
+    path.resolve(rootDir, excludedPath)
+  );
+}
+
+function isExcluded(filePath: string, excludedPaths: string[]): boolean {
+  return excludedPaths.some(
+    (excludedPath) =>
+      filePath === excludedPath || filePath.startsWith(excludedPath + path.sep)
+  );
+}
+
+export function discoverFiles(rootDir: string, excludedPaths: string[] = []): string[] {
   const files: string[] = [];
+  const normalizedExclusions = normalizeExcludedPaths(rootDir, excludedPaths);
 
   function walk(dir: string): void {
     let entries: fs.Dirent[];
@@ -71,7 +85,9 @@ export function discoverFiles(rootDir: string): string[] {
         if (SKIP_DIRS.has(entry.name)) continue;
         // Skip hidden directories (except the root)
         if (entry.name.startsWith(".") && dir !== rootDir) continue;
-        walk(path.join(dir, entry.name));
+        const childDir = path.join(dir, entry.name);
+        if (isExcluded(childDir, normalizedExclusions)) continue;
+        walk(childDir);
       } else if (entry.isFile()) {
         const name = entry.name;
         if (SKIP_FILES.has(name)) continue;
@@ -240,11 +256,11 @@ export function resolveProjectImport(
 }
 
 export function createResolver(projectRoot: string, tsconfigPath: string): ResolverFactory {
+  const configFile = path.resolve(projectRoot, tsconfigPath);
   return new ResolverFactory({
-    tsconfig: {
-      configFile: path.resolve(projectRoot, tsconfigPath),
-      references: "auto",
-    },
+    ...(fs.existsSync(configFile)
+      ? { tsconfig: { configFile, references: "auto" as const } }
+      : {}),
     extensions: [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"],
     extensionAlias: {
       ".js": [".ts", ".tsx", ".js"],
@@ -328,12 +344,13 @@ function buildReverseMap(forward: Map<string, ImportEdge[]>): Map<string, Import
 
 export async function buildGraph(
   projectRoot: string,
-  tsconfigPath: string
+  tsconfigPath: string,
+  excludedPaths: string[] = []
 ): Promise<BuildGraphResult> {
   const startTime = performance.now();
 
   const resolver = createResolver(projectRoot, tsconfigPath);
-  const fileList = discoverFiles(projectRoot);
+  const fileList = discoverFiles(projectRoot, excludedPaths);
 
   log(`Discovered ${fileList.length} source files`);
 
@@ -464,9 +481,11 @@ export function startWatcher(
   hooks?: {
     onFileUpdated?: (filePath: string) => void | Promise<void>;
     onFileDeleted?: (filePath: string) => void | Promise<void>;
-  }
+  },
+  excludedPaths: string[] = []
 ): void {
   try {
+    const normalizedExclusions = normalizeExcludedPaths(projectRoot, excludedPaths);
     const watcher = fs.watch(
       projectRoot,
       { recursive: true },
@@ -489,6 +508,7 @@ export function startWatcher(
           return;
 
         const absPath = path.resolve(projectRoot, filename);
+        if (isExcluded(absPath, normalizedExclusions)) return;
 
         if (fs.existsSync(absPath)) {
           // File created or modified

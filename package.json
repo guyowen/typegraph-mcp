@@ -33,8 +33,9 @@
   ],
   "scripts": {
     "build": "tsup",
+    "setup:self": "tsx scripts/self-install.ts",
     "start": "tsx server.ts",
-    "test": "tsx smoke-test-selection-test.ts && tsx biome-config-test.ts && tsx tsserver-resolution-test.ts && tsx export-surface-test.ts && tsx engine-sync-test.ts && tsx install-oxlint-test.ts",
+    "test": "tsx tests/smoke-test-selection-test.ts && tsx tests/biome-config-test.ts && tsx tests/self-install-test.ts && tsx tests/tsserver-resolution-test.ts && tsx tests/export-surface-test.ts && tsx tests/engine-sync-test.ts && tsx tests/install-oxlint-test.ts",
     "check": "tsx check.ts"
   },
   "dependencies": {

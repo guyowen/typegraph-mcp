@@ -1,3 +1,8 @@
 node_modules/
 dist/
 agent-notes.md
+/plugins/typegraph-mcp/
+/.agents/
+/.codex/
+/AGENTS.md
+/CLAUDE.md

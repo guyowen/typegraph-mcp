@@ -144,8 +144,9 @@ const SKIP_DIRS = new Set([
 ]);
 
 /** Find a file with imports and exported symbols (good test candidate) */
-function findTestFile(rootDir: string): string | null {
+function findTestFile(rootDir: string, excludedPaths: string[] = []): string | null {
   const candidates: Array<{ file: string; size: number }> = [];
+  const normalizedExclusions = excludedPaths.map((excludedPath) => path.resolve(excludedPath));
 
   function walk(dir: string, depth: number): void {
     if (depth > 5 || candidates.length >= 30) return;
@@ -158,7 +159,14 @@ function findTestFile(rootDir: string): string | null {
     for (const entry of entries) {
       if (entry.isDirectory()) {
         if (SKIP_DIRS.has(entry.name) || entry.name.startsWith(".")) continue;
-        walk(path.join(dir, entry.name), depth + 1);
+        const childDir = path.join(dir, entry.name);
+        if (
+          normalizedExclusions.some(
+            (excludedPath) =>
+              childDir === excludedPath || childDir.startsWith(excludedPath + path.sep)
+          )
+        ) continue;
+        walk(childDir, depth + 1);
       } else if (entry.isFile()) {
         const name = entry.name;
         if (name.endsWith(".d.ts") || name.endsWith(".test.ts") || name.endsWith(".spec.ts"))
@@ -166,7 +174,7 @@ function findTestFile(rootDir: string): string | null {
         if (!name.endsWith(".ts") && !name.endsWith(".tsx")) continue;
         try {
           const stat = fs.statSync(path.join(dir, name));
-          if (stat.size > 200 && stat.size < 50000) {
+          if (stat.size > 0 && stat.size < 50000) {
             candidates.push({ file: path.join(dir, name), size: stat.size });
           }
         } catch {
@@ -199,8 +207,9 @@ function findImporter(graph: ModuleGraph, file: string): string | null {
 // ─── Main ────────────────────────────────────────────────────────────────────
 
 export async function main(configOverride?: TypegraphConfig): Promise<SmokeTestResult> {
-  const { projectRoot, tsconfigPath } =
+  const { projectRoot, tsconfigPath, toolDir, toolIsEmbedded } =
     configOverride ?? resolveConfig(import.meta.dirname);
+  const excludedPaths = toolIsEmbedded ? [toolDir] : [];
 
   let passed = 0;
   let failed = 0;
@@ -231,7 +240,7 @@ export async function main(configOverride?: TypegraphConfig): Promise<SmokeTestR
 
   // ─── Discover a test file ───────────────────────────────────────────────
 
-  const testFile = findTestFile(projectRoot);
+  const testFile = findTestFile(projectRoot, excludedPaths);
   if (!testFile) {
     console.log("  No suitable .ts file found in project. Cannot run smoke tests.");
     return { passed, failed: failed + 1, skipped };
@@ -250,7 +259,7 @@ export async function main(configOverride?: TypegraphConfig): Promise<SmokeTestR
   // Graph build
   t0 = performance.now();
   try {
-    const result = await buildGraph(projectRoot, tsconfigPath);
+    const result = await buildGraph(projectRoot, tsconfigPath, excludedPaths);
     graph = result.graph;
     const ms = performance.now() - t0;
     const edgeCount = [...graph.forward.values()].reduce((s, e) => s + e.length, 0);

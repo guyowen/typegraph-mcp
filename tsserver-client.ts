@@ -205,14 +205,11 @@ export class TsServerClient {
       },
     });
 
-    // Warm up by opening the tsconfig's root file
+    // Keep inferred projects useful when the target has no tsconfig or a file sits outside it.
     const warmStart = performance.now();
-    const tsconfigAbs = this.resolvePath(this.tsconfigPath);
-    if (fs.existsSync(tsconfigAbs)) {
-      await this.sendRequest("compilerOptionsForInferredProjects", {
-        options: { allowJs: true, checkJs: false },
-      });
-    }
+    await this.sendRequest("compilerOptionsForInferredProjects", {
+      options: { allowJs: true, checkJs: false },
+    });
     this.ready = true;
     log(`Ready [${(performance.now() - warmStart).toFixed(0)}ms configure]`);
   }

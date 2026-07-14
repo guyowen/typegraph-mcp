@@ -4,7 +4,7 @@ import * as assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { resolveTsServer } from "./tsserver-client.js";
+import { resolveTsServer } from "../tsserver-client.js";
 
 function createProject(root: string, name: string): string {
   const projectRoot = path.join(root, name);
@@ -16,7 +16,7 @@ function createProject(root: string, name: string): string {
   return projectRoot;
 }
 
-const repoRoot = import.meta.dirname;
+const repoRoot = path.resolve(import.meta.dirname, "..");
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "typegraph-tsserver-resolution-"));
 
 try {

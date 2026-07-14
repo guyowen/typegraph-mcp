@@ -1,8 +1,8 @@
 #!/usr/bin/env npx tsx
 
 import * as assert from "node:assert/strict";
-import type { NavBarItem, QuickInfoResult } from "./tsserver-client.js";
-import { selectQuickInfoSymbol } from "./smoke-test.js";
+import type { NavBarItem, QuickInfoResult } from "../tsserver-client.js";
+import { selectQuickInfoSymbol } from "../smoke-test.js";
 
 const syntheticCallback: NavBarItem = {
   text: "Alpine.data('table') callback",

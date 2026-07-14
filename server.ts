@@ -41,7 +41,8 @@ import { resolveConfig } from "./config.js";
 
 // ─── Configuration ───────────────────────────────────────────────────────────
 
-const { projectRoot, tsconfigPath } = resolveConfig(import.meta.dirname);
+const { projectRoot, tsconfigPath, toolDir, toolIsEmbedded } = resolveConfig(import.meta.dirname);
+const excludedPaths = toolIsEmbedded ? [toolDir] : [];
 
 const log = (...args: unknown[]) => console.error("[typegraph]", ...args);
 
@@ -1127,29 +1128,35 @@ async function main() {
   // Start tsserver and build module graph concurrently
   const [, graphResult] = await Promise.all([
     client.start(),
-    buildGraph(projectRoot, tsconfigPath),
+    buildGraph(projectRoot, tsconfigPath, excludedPaths),
   ]);
 
   moduleGraph = graphResult.graph;
   moduleResolver = graphResult.resolver;
-  startWatcher(projectRoot, moduleGraph, graphResult.resolver, {
-    onFileUpdated: (filePath) =>
-      client.reloadOpenFile(filePath).then(
-        (wasOpen) => {
-          // Closed files: tsserver's own disk watching decays in long-lived
-          // instances; force a projects reload before the next query.
-          if (!wasOpen) client.markProjectsDirty();
-        },
-        (err) => {
-          client.markProjectsDirty();
-          log(`Failed to reload open file ${relPath(filePath)}:`, err);
-        }
-      ),
-    onFileDeleted: (filePath) => {
-      client.closeFile(filePath);
-      client.markProjectsDirty();
+  startWatcher(
+    projectRoot,
+    moduleGraph,
+    graphResult.resolver,
+    {
+      onFileUpdated: (filePath) =>
+        client.reloadOpenFile(filePath).then(
+          (wasOpen) => {
+            // Closed files: tsserver's own disk watching decays in long-lived
+            // instances; force a projects reload before the next query.
+            if (!wasOpen) client.markProjectsDirty();
+          },
+          (err) => {
+            client.markProjectsDirty();
+            log(`Failed to reload open file ${relPath(filePath)}:`, err);
+          }
+        ),
+      onFileDeleted: (filePath) => {
+        client.closeFile(filePath);
+        client.markProjectsDirty();
+      },
     },
-  });
+    excludedPaths
+  );
 
   const transport = new StdioServerTransport();
   await mcpServer.connect(transport);

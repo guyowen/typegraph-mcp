@@ -666,8 +666,17 @@ async function benchmarkAccuracy(
 
 // ─── Main ────────────────────────────────────────────────────────────────────
 
-export async function main(config?: { projectRoot: string; tsconfigPath: string }) {
-  ({ projectRoot, tsconfigPath } = config ?? resolveConfig(import.meta.dirname));
+export async function main(config?: {
+  projectRoot: string;
+  tsconfigPath: string;
+  toolDir?: string;
+  toolIsEmbedded?: boolean;
+}) {
+  const resolvedConfig = config ?? resolveConfig(import.meta.dirname);
+  ({ projectRoot, tsconfigPath } = resolvedConfig);
+  const excludedPaths = resolvedConfig.toolIsEmbedded && resolvedConfig.toolDir
+    ? [resolvedConfig.toolDir]
+    : [];
   console.log("");
   console.log("typegraph-mcp Benchmark");
   console.log("=======================");
@@ -676,7 +685,7 @@ export async function main(config?: { projectRoot: string; tsconfigPath: string 
 
   // Build graph
   const graphStart = performance.now();
-  const { graph } = await buildGraph(projectRoot, tsconfigPath);
+  const { graph } = await buildGraph(projectRoot, tsconfigPath, excludedPaths);
   const graphMs = performance.now() - graphStart;
   const edgeCount = [...graph.forward.values()].reduce((s, e) => s + e.length, 0);
   console.log(`Module graph: ${graph.files.size} files, ${edgeCount} edges [${graphMs.toFixed(0)}ms]`);

@@ -87,7 +87,7 @@ First query takes ~2s (tsserver warmup). Subsequent queries: 1-60ms.
 ## Requirements
 
 - **Node.js** >= 22
-- A TypeScript project with `tsconfig.json` (TypeGraph carries a compatible tsserver runtime for TypeScript 7 projects)
+- A project containing TypeScript source files. `tsconfig.json` is supported but optional; without one, semantic tools use an inferred TypeScript project.
 - **npm** for dependency installation
 
 ## Tools
@@ -148,7 +148,7 @@ npx typegraph-mcp check
 | Server won't start | `cd plugins/typegraph-mcp && npm install --include=optional` |
 | "Compatible tsserver not found" | Reinstall the plugin dependencies; TypeGraph uses the project's legacy tsserver when available and its bundled TypeScript 5 runtime for TypeScript 7 projects |
 | Tools return empty results | Check `TYPEGRAPH_TSCONFIG` points to the right tsconfig |
-| Build errors from plugins/ | Add `"plugins/**"` to tsconfig.json `exclude` array |
+| Broad project checks include plugins/ | Narrow the check command's input or ignore `plugins/`; setup does not edit `tsconfig.json` |
 | `@esbuild/*` or `@rollup/*` package missing | Reinstall with Node 22: `npm install --include=optional` |
 | "npm warn Unknown project config" | Safe to ignore — caused by pnpm settings in your `.npmrc` that npm doesn't recognize |
 
@@ -223,6 +223,15 @@ cd typegraph-mcp
 nvm use
 npm install --include=optional
 ```
+
+To install the current checkout into itself for Claude Code and Codex CLI:
+
+```bash
+npm run setup:self
+```
+
+The wrapper invokes the local `cli.ts`. In a Git worktree it first adds every generated
+plugin, skill, MCP configuration, and agent-instruction path to `.gitignore`.
 
 ### Run locally against a project
 

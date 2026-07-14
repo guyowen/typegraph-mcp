@@ -1,7 +1,7 @@
 #!/usr/bin/env npx tsx
 
 import * as assert from "node:assert/strict";
-import { biomeScopeExcludes, patchBiomeConfig } from "./biome-config.js";
+import { biomeScopeExcludes, patchBiomeConfig } from "../biome-config.js";
 
 const broadConfig = `{
   "files": {

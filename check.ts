@@ -28,7 +28,7 @@ export interface CheckResult {
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /** Find first .ts file in the project (for resolver smoke test) */
-function findFirstTsFile(dir: string): string | null {
+function findFirstTsFile(dir: string, excludedPaths: string[] = []): string | null {
   const skipDirs = new Set(["node_modules", "dist", ".git", ".wrangler", "coverage"]);
   try {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -38,7 +38,14 @@ function findFirstTsFile(dir: string): string | null {
     }
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       if (entry.isDirectory() && !skipDirs.has(entry.name) && !entry.name.startsWith(".")) {
-        const found = findFirstTsFile(path.join(dir, entry.name));
+        const childDir = path.join(dir, entry.name);
+        if (
+          excludedPaths.some(
+            (excludedPath) =>
+              childDir === excludedPath || childDir.startsWith(excludedPath + path.sep)
+          )
+        ) continue;
+        const found = findFirstTsFile(childDir, excludedPaths);
         if (found) return found;
       }
     }
@@ -273,6 +280,7 @@ function findLintConfigs(projectRoot: string): LintConfigCheck[] {
 export async function main(configOverride?: TypegraphConfig): Promise<CheckResult> {
   const { projectRoot, tsconfigPath, toolDir, toolIsEmbedded, toolRelPath } =
     configOverride ?? resolveConfig(import.meta.dirname);
+  const excludedPaths = toolIsEmbedded ? [toolDir] : [];
 
   let passed = 0;
   let failed = 0;
@@ -344,12 +352,12 @@ export async function main(configOverride?: TypegraphConfig): Promise<CheckResul
     );
   }
 
-  // 4. tsconfig.json exists
+  // 4. TypeScript project mode
   const tsconfigAbs = path.resolve(projectRoot, tsconfigPath);
   if (fs.existsSync(tsconfigAbs)) {
     pass(`tsconfig.json exists at ${tsconfigPath}`);
   } else {
-    fail(`tsconfig.json not found at ${tsconfigPath}`, `Create a tsconfig.json at ${tsconfigPath}`);
+    pass("No tsconfig.json; semantic tools will use an inferred TypeScript project");
   }
 
   // 5. MCP registration
@@ -505,13 +513,15 @@ export async function main(configOverride?: TypegraphConfig): Promise<CheckResul
     const oxcResolverReq = createRequire(path.join(toolDir, "package.json"));
     const { ResolverFactory } = await import(oxcResolverReq.resolve("oxc-resolver"));
     const resolver = new ResolverFactory({
-      tsconfig: { configFile: tsconfigAbs, references: "auto" },
+      ...(fs.existsSync(tsconfigAbs)
+        ? { tsconfig: { configFile: tsconfigAbs, references: "auto" as const } }
+        : {}),
       extensions: [".ts", ".tsx", ".js"],
       extensionAlias: { ".js": [".ts", ".tsx", ".js"] },
     });
     // Find any .ts file in the project to test resolution
     let resolveOk = false;
-    const testFile = findFirstTsFile(projectRoot);
+    const testFile = findFirstTsFile(projectRoot, excludedPaths);
     if (testFile) {
       const dir = path.dirname(testFile);
       const base = "./" + path.basename(testFile);
@@ -558,7 +568,7 @@ export async function main(configOverride?: TypegraphConfig): Promise<CheckResul
 
   // 10. Module graph build test
   try {
-    let buildGraph: (root: string, tsconfig: string) => Promise<{ graph: { files: Set<string>; forward: Map<string, unknown[]> } }>;
+    let buildGraph: (root: string, tsconfig: string, excluded?: string[]) => Promise<{ graph: { files: Set<string>; forward: Map<string, unknown[]> } }>;
     try {
       ({ buildGraph } = await import(path.resolve(toolDir, "module-graph.js")));
     } catch {
@@ -566,7 +576,11 @@ export async function main(configOverride?: TypegraphConfig): Promise<CheckResul
       ({ buildGraph } = await import("./module-graph.js"));
     }
     const start = performance.now();
-    const { graph } = await buildGraph(projectRoot, tsconfigPath);
+    const { graph } = await buildGraph(
+      projectRoot,
+      tsconfigPath,
+      excludedPaths
+    );
     const elapsed = (performance.now() - start).toFixed(0);
     const edgeCount = [...graph.forward.values()].reduce(
       (s: number, e: unknown[]) => s + e.length,
