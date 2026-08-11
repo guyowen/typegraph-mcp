@@ -16,8 +16,8 @@ Analyze the impact of changing a TypeScript symbol by combining blast radius, de
 
 ## Workflow
 
-### Step 1: Blast Radius
-Call `ts_blast_radius` with the file and symbol to get direct callers and affected files.
+### Step 1: Symbol Overview
+Call `ts_symbol_overview` with the file and symbol to get the definition, type, direct callers, affected files, and blast radius in one response.
 
 ### Step 2: Assess Scope
 - If **< 5 callers**: Low impact. Report the callers and you're done.
@@ -42,8 +42,8 @@ Present findings as:
 ```
 User: "What happens if I change the TenantId schema?"
 
-1. ts_blast_radius({ file: "packages/core/src/schemas/ids.ts", symbol: "TenantId" })
-   -> 45 direct callers across 28 files
+1. ts_symbol_overview({ file: "packages/core/src/schemas/ids.ts", symbol: "TenantId" })
+   -> 45 direct callers across 28 files, plus definition and hover type
 
 2. ts_dependents({ file: "packages/core/src/schemas/ids.ts" })
    -> 158 transitive dependents across 4 packages

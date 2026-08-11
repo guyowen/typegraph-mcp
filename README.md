@@ -1,277 +1,277 @@
 # typegraph-mcp
 
-<p align="center">
-  <img src="./assets/hero.jpg" alt="typegraph-mcp — Semantic TypeScript understanding for AI agents" width="800">
-</p>
+Type-aware codebase navigation for AI coding agents, on TypeScript 7.
 
-Supercharge your AI coding agent with TypeScript superintelligence.
+This server drives **tsgo** via `@effect/tsgo` in `--api` mode, with a small LSP supplement for project-wide local-symbol search and document symbols. It is built for codebases that have moved to TypeScript 7 and need semantic TypeScript navigation through MCP.
 
-14 semantic navigation tools delivered via the [Model Context Protocol](https://modelcontextprotocol.io/) so any MCP-compatible agent can use them.
+Status: **working end to end.** All 18 MCP tools implemented, verified against a real project on `@effect/tsgo` 0.32.1 / `typescript` 7.0.2. 100 assertions pass on bare `node`; the published package runs compiled `dist/` entrypoints, with no `tsx` runtime dependency. `tsc --noEmit` is clean.
 
-- **Instant type resolution** — hover info, generics, inferred types without reading files
-- **Instant call tracing** — follow a symbol from handler to implementation in one call
-- **Instant impact analysis** — "what breaks if I change this?" across the entire codebase
-- **Instant dependency mapping** — what imports what, direct and transitive, by package
-- **Instant cycle detection** — circular imports found in <1ms
-- **Zero false positives** — semantic references, not string matches
+Installed as skills + an MCP entry per agent. Nothing is copied into your project but SKILL.md files — see [Install model](#install-model-skills--mcp-config-nothing-else).
 
-## The problem
+## Why TSGo
 
-AI coding agents navigate TypeScript blind. They `grep` for a symbol name and get string matches instead of real references. They read entire files to find a type that's re-exported through three barrel files. They can't tell you what depends on what, or whether your refactor will break something two packages away.
+TSGo has no `tsserver` entrypoint. It exposes a separate `--api` RPC surface for semantic checker/program operations and an LSP surface for editor-style queries. TypeGraph-Go uses both deliberately:
 
-Every wrong turn burns context tokens and degrades the agent's output.
+- `--api` powers definitions, references, hover types, module exports, trace-chain, blast-radius, and the exact export index.
+- LSP powers optional local-symbol search and document symbols, including route-table and handler-map keys that project-wide export indexes do not see.
 
-## The difference
+## Architecture
 
-Measured on a real 440-file TypeScript monorepo:
+```
+MCP client (Claude Code, OpenCode, Codex, …)
+        │
+        ├── 7 point-query tools  ──► src/api-client.ts
+        │                             typescript/unstable/async
+        │                             └─► effect-tsgo --api   (JSON-RPC + msgpack)
+        │
+        ├── ts_navigate_to       ──► src/navigate-to.ts  (export index + LSP coordinates/locals)
+        │
+        ├── 4 agent helper tools ──► composites over semantic + graph backends
+        │
+        └── 6 graph tools        ──► oxc-parser / oxc-resolver   (version-independent)
+```
 
-| | grep | typegraph-mcp |
+The binary comes from `@effect/tsgo` rather than `typescript`, because `--api` survives Effect's patch set untouched (`_patches/typescript-go/001-cmd-tsgo-main.patch` only *adds* a case) while their checker and hover patches make type display Effect-aware. Falls back to typescript's own binary when `@effect/tsgo` isn't installed.
+
+## Tool surface
+
+Point and navigation tools:
+
+- `ts_find_symbol`
+- `ts_definition`
+- `ts_references`
+- `ts_type_info`
+- `ts_navigate_to`
+- `ts_trace_chain`
+- `ts_blast_radius`
+- `ts_module_exports`
+
+Agent helper tools:
+
+- `ts_project_info` — confirm project root, tsconfig, backend, export-index size, and graph size.
+- `ts_document_symbols` — inspect one file's symbols, including object-literal keys.
+- `ts_symbol_overview` — one-call definition, type, reference summary, and blast radius for a symbol.
+- `ts_dead_exports` — possible unused exports in one module.
+
+Graph tools:
+
+- `ts_dependency_tree`
+- `ts_dependents`
+- `ts_import_cycles`
+- `ts_shortest_path`
+- `ts_subgraph`
+- `ts_module_boundary`
+
+## Version pinning is load-bearing
+
+`tsgo --api` has **no protocol version handshake**, and its encoders are code-generated. A client/server mismatch surfaces as msgpack decode errors mid-request, not a clean error.
+
+`typescript` is therefore pinned **exact** to `7.0.2` — the version `@effect/tsgo` pins on its `latest` channel (`_packages/tsgo/upstream.json` → gitHead `2bd066d`). `src/version-guard.ts` reads that manifest at runtime and refuses to start on a mismatch.
+
+## `ts_navigate_to`
+
+Benchmarked both viable strategies on a 1506-file fixture (~9000 exports, 3000 non-exported locals):
+
+| | export index (API) | `workspace/symbol` (LSP) |
 |---|---|---|
-| **Context tokens** | ~113,000 | 1,006 |
-| **Files touched** | 47 | 3 |
-| **False positives** | dozens | 0 |
-| **Barrel file resolution** | reads 6 files, still guessing | 1 tool call, exact source |
-| **Cross-package impact** | 1,038 string matches | 31 direct + 158 transitive, by package |
-| **Circular dependency detection** | impossible | instant |
-| **Avg latency (semantic)** | n/a | 16.9ms |
-| **Avg latency (graph)** | n/a | 0.1ms |
+| Coverage | module exports only | every declaration, incl. locals + methods |
+| Matching | exact substring | fuzzy subsequence |
+| Result cap | none | **256, hard-coded, unflagged** |
+| Build cost | ~0.13 ms/file (191ms @ 1506) | none |
+| Query | <1ms | 2–6ms |
 
-**99% context reduction. 100% accuracy. [Full benchmarks](./BENCHMARKS.md).**
+The index is the default. The 256 cap (`typescript-go` `internal/ls/symbols.go:558`) is silent, and at 1506 files *every* non-trivial query saturated it — which would quietly break the `deep-survey` skill's Phase 3b, where `ts_navigate_to` is used to *count* pattern prevalence.
 
-### Before: grep-based navigation
+`includeLocals: true` opts into the LSP path. The result reports `exportHits` and `localHits` separately, with `localsTruncated` scoped to the LSP half — a single blanket `truncated` flag would push callers to discard exact export counts alongside the capped local ones.
+
+`maxResults` (default 10) trims the returned **list**, sorted best-match first, and leaves every count describing the full set. `listTrimmed` therefore means something different from `localsTruncated`: one shortens a list, the other invalidates a count. Collapsing them would put the 256-cap hazard back by another route.
+
+`file` adds one file's document symbols to the search. That is the only route to **object-literal property keys** — RPC handler maps, route tables — which neither backend's project-wide index sees. Measured on 7.0.2 against a handler map:
+
+| | `workspace/symbol "Handler"` | `documentSymbol` |
+|---|---|---|
+| hits | 1 (the `rpcHandlers` binding) | 10 (every key, incl. nested) |
+
+Two tsgo LSP behaviours worth knowing, both encoded in `src/lsp-client.ts`:
+- `workspace/symbol` returns `[]` until a project is loaded — you must `didOpen` a file first.
+- The server issues `client/registerCapability` and **blocks** until the client replies.
+
+## Install model: skills + MCP config, nothing else
+
+`setup` writes two kinds of thing into a project — SKILL.md files, and an MCP
+server entry in each agent's own config. It does not copy this package
+anywhere. There is no plugin directory, no second `node_modules` to install,
+and no vendored copy to drift out of sync with the one npm manages.
+
+| Provider | Skills directory | MCP config |
+|---|---|---|
+| Claude Code | `.claude/skills/` | `.mcp.json` |
+| Cursor | `.cursor/skills/`, or rides along with `.claude`/`.agents` | `.cursor/mcp.json` |
+| OpenCode | `.claude/skills/` or `.agents/skills/` (whichever is already written) | `opencode.json(c)` |
+| Codex | `.agents/skills/` | `.codex/config.toml` |
+| Copilot | `.agents/skills/` | `.vscode/mcp.json` |
+| Antigravity | `.agents/skills/` | `~/.gemini/antigravity/mcp_config.json` |
+| Gemini CLI | `.agents/skills/` | — none; register manually |
+
+Cursor and OpenCode each read several of these locations, so
+`computeSkillTargets()` computes a minimal covering set rather than writing
+per-agent. Selecting all seven providers writes **two** directories, not four —
+otherwise the flexible agents would discover every skill more than once.
+
+### Which copy of the server gets registered
+
+`resolveServerTarget()` prefers a copy resolvable *from the project* — a real
+dependency — and writes a **project-relative** path for it. That matters
+because `.mcp.json`, `.cursor/mcp.json` and `opencode.json` normally get
+committed: an absolute path resolves only on the machine that ran `setup`.
+Antigravity's config lives in `$HOME` and cannot use a relative path for either
+the server or the project root, so it alone gets absolutes.
+
+Falling back to the running copy is fine for a global install or a dev
+checkout, but an npx-cache path is flagged: npm garbage-collects that
+directory, which would leave the entry pointing at nothing.
+
+The literal `node_modules/typegraph-mcp` is preferred over what
+`require.resolve` returns, because that is a realpath — under pnpm it is
+`node_modules/.pnpm/typegraph-mcp@<version>/node_modules/typegraph-mcp`, a
+version-pinned path that dies on the next upgrade. The symlink is the stable
+name.
+
+### Public entry points, no flag
 
 ```
-Agent: I need to find where createUser is implemented.
-  → grep "createUser" across project
-  → 47 results: test files, comments, variable names, string literals, actual definitions
-  → reads 6 files trying to follow the chain
-  → burns ~113,000 tokens, still not sure it found the right implementation
+typegraph-mcp setup|remove|check  the installer
+typegraph-mcp                     serves when stdio is piped; prints usage at a TTY
+typegraph                         compatibility alias for typegraph-mcp
+typegraph-mcp-server              direct stdio server
 ```
 
-### After: typegraph-mcp
+An MCP entry never has to name a subcommand or a path inside the package —
+`npx typegraph-mcp` with stdio piped is a complete server command. The installer
+still writes `node <path>` instead, which skips npx's resolver on every server
+start and cannot reach the network for a version you did not ask for; both work.
 
-```
-Agent: ts_trace_chain({ file: "src/handlers.ts", symbol: "createUser" })
-  → 3-hop chain: handlers.ts → UserService.ts → UserRepository.ts
-  → each hop shows the exact line with a code preview
-  → 1,006 tokens, done
-```
+`typegraph-mcp` with no arguments decides by looking at stdin. A client always
+arrives with stdio piped; a person at a terminal does not, and gets usage rather
+than a process that appears to hang. The public bin is a tiny `dist/cli.cjs`
+trampoline in the published package (`src/cli.cjs` in source checkout mode)
+that validates Node before importing the implementation; `src/cli.ts`
+therefore imports nothing but `node:path` at the top level and loads each branch
+dynamically — @clack/prompts writes to stdout, and stdout carries nothing but
+JSON-RPC once a client is connected. `tests/cli-dispatch-test.ts` asserts that
+statically.
 
-## Quick start
+## Installer invariants
 
-### Step 1: Install
+1. **`${CLAUDE_PLUGIN_ROOT}` was never expanded** for non-Claude agents. Only Claude Code expands it, and only for plugin-discovered skills — so `.agents/skills/` copies shipped it literally. With no plugin directory at all, nothing would expand it anywhere. Replaced by an install-time `__TYPEGRAPH_ROOT__` absolute-path substitution.
+
+2. **Baked interpreter paths rot, but stale `node` is worse.** `process.execPath` under nvm bakes `~/.nvm/versions/node/v24.1.0/bin/node`, which vanishes on the next Node upgrade — silently preventing the MCP server from starting. `resolveInterpreter()` prefers a compatible `node` on PATH, but falls back to the current executable rather than writing a command that resolves to Node <22.18. `typegraph-mcp check` detects both dead paths and too-old interpreters.
+
+3. **Global MCP entries were never removed.** `remove` deregistered project configs but left Antigravity's `~/.gemini/antigravity/mcp_config.json` entry behind, pointing at an uninstalled server.
+
+## Commands
+
+Use Node 24 for development. The repo carries both `.nvmrc` and `.node-version`
+with `24.11.0`; `engines.node` remains `>=22.18` because 22.18 is the runtime
+floor for native TypeScript type stripping. This package uses npm, so there is
+no pnpm-specific Node-version control involved.
 
 ```bash
-cd /path/to/your-ts-project
-npx typegraph-mcp setup
+npm test           # routing, installer, and live-invalidation tests
+npm run check      # health check: binary, version skew, stale interpreters
+npm run typecheck  # tsc --noEmit (TypeScript 7)
+
+# end-to-end against a real project
+node tests/server-smoke.ts <projectRoot>
+node tests/refresh-bench.ts <projectRoot>
 ```
 
-The interactive setup auto-detects your AI agents, installs the plugin into `./plugins/typegraph-mcp/`, registers the MCP server, copies workflow skills, appends agent instructions, and runs verification. Use `--yes` to skip prompts.
+Verified on a 1506-file fixture against `@effect/tsgo` 0.32.1 / `typescript` 7.0.2:
 
-### Step 2: Launch your agent
+```
+boot + snapshot: 74.9ms      binary: @effect/tsgo
+index build:    177.3ms  ->  31502 entries, 10502 unique (0.118 ms/file)
+checker:        makeWidget0 : (id: string) => Widget0
+```
 
-**Claude Code** — load the plugin for the full experience:
+The 3× gap between raw entries and unique symbols is barrel re-export duplication, collapsed exactly by deduping on `symbol.id`.
+
+## Install
 
 ```bash
-claude --plugin-dir ./plugins/typegraph-mcp
+npm install --save-dev typegraph-mcp   # so configs can be relative, and committed
+npx typegraph-mcp setup                 # detects agents, installs MCP + skills
+npx typegraph-mcp check                 # verify
+npx typegraph-mcp remove                # full round-trip undo
 ```
 
-This gives you 14 MCP tools, 5 workflow skills that teach Claude *when* and *how* to chain tools, `/typegraph:check`, `/typegraph:test`, and `/typegraph:bench` slash commands, and a SessionStart hook for dependency verification.
+`setup` works without the first line — it just writes absolute paths and says so.
 
-**Other agents** (Cursor, Codex CLI, Gemini CLI, GitHub Copilot) — restart your agent session. The MCP server and skills are already configured.
+`check` verifies the three things that otherwise fail silently: the tsgo binary
+resolves, the client/binary versions still agree, and every installed config's
+interpreter is present/new enough while the server path still exists on disk.
 
-For **Codex CLI**, setup now writes a project-local `.codex/config.toml` entry using absolute paths so the tools stay scoped to the project and still work when Codex launches from a subdirectory.
+`opencode.jsonc` is handled properly — `src/jsonc.ts` is a string-aware comment
+stripper, so a config containing `https://example.com//docs` survives
+registration intact. The inherited installer would have hit `JSON.parse`, warned,
+and silently skipped registering the server.
 
-First query takes ~2s (tsserver warmup). Subsequent queries: 1-60ms.
+### TypeScript runtime and tsconfig
 
-## Requirements
+The semantic backend always speaks the TypeScript 7 `--api` protocol. It first
+tries the Effect-patched `@effect/tsgo` binary for projects that already carry a
+native TypeScript 7 package (`typescript@>=7` or `@typescript/native`). If the
+target project is still on TypeScript 5.x, it falls back to this package's
+bundled `typescript@7.0.2` binary and analyzes the project in compatibility
+mode. That lets TypeScript 5 projects use the tool without changing their own
+compiler dependency, while keeping the MCP client and TSGo binary on the same
+wire protocol.
 
-- **Node.js** >= 22
-- A project containing TypeScript source files. `tsconfig.json` is supported but optional; without one, semantic tools use an inferred TypeScript project.
-- **npm** for dependency installation
+TSGo also needs an explicit tsconfig project. The installer writes
+`TYPEGRAPH_TSCONFIG=./tsconfig.json` by default; set `TYPEGRAPH_TSCONFIG` before
+running setup if the project uses a different root config.
 
-## Tools
+## Build and runtime model
 
-### Semantic queries (tsserver)
+There is no bundler and no `tsx`. Source checkout commands use `.cjs`
+trampolines (`src/cli.cjs`, `src/server.cjs`, `src/check.cjs`) that validate
+Node before importing the `.ts` implementations, so old Node prints a clear
+version error instead of dying on `ERR_UNKNOWN_FILE_EXTENSION`.
 
-| Tool | Description |
+The npm package publishes compiled `dist/` entrypoints. That is required because
+Node's native TypeScript type stripping deliberately refuses to strip `.ts`
+files under `node_modules`; a devDependency install must run `.js`, even on
+Node 24.
+
+The source-mode cost is staying inside **erasable syntax**: no parameter
+properties, no enums, no namespaces, and `.ts` import specifiers throughout
+(strip-only mode does not remap `.js` → `.ts`). The published `dist/` build
+rewrites relative `.ts` imports to `.js` before packing.
+
+This avoids an install-time failure mode: `tsx` is not needed at runtime, and
+the package is designed for installs that omit dev dependencies.
+
+## Live invalidation
+
+`fs.watch` feeds a dirty set that is applied lazily before each query, so a
+burst of edits collapses into one refresh. Measured on the 1506-file fixture
+(`tests/refresh-bench.ts`):
+
+| | |
 |---|---|
-| `ts_find_symbol` | Find a symbol's location in a file by name |
-| `ts_definition` | Go to definition — resolves through imports, re-exports, barrel files, generics |
-| `ts_references` | Find all semantic references (not string matches) |
-| `ts_type_info` | Get type and documentation — same as VS Code hover |
-| `ts_navigate_to` | Search for a symbol across the entire project |
-| `ts_trace_chain` | Follow definition hops automatically, building a call chain |
-| `ts_blast_radius` | Analyze impact of changing a symbol — all usage sites and affected files |
-| `ts_module_exports` | List all exports from a module with resolved types |
+| full re-snapshot | 3.5ms |
+| `applyChanges({changed:[1]})` | 1.3ms |
+| `reindex(1 file)` | 1.4ms |
+| full index rebuild | 115.7ms |
 
-### Import graph queries (oxc-parser + oxc-resolver)
+The snapshot was never the expensive part — tsgo keeps the program warm. The
+cost is the export index, at ~83× a targeted re-index. That is why `Invalidator`
+tracks *which* files changed rather than a dirty boolean: `updateSnapshot`
+reports back per-project `changedFiles`, so re-indexing is surgical rather than
+inferred.
 
-| Tool | Description |
-|---|---|
-| `ts_dependency_tree` | Transitive dependency tree of a file |
-| `ts_dependents` | All files that depend on a given file, grouped by package |
-| `ts_import_cycles` | Detect circular import dependencies |
-| `ts_shortest_path` | Shortest import path between two files |
-| `ts_subgraph` | Extract the neighborhood around seed files |
-| `ts_module_boundary` | Analyze module coupling: incoming/outgoing edges, isolation score |
+## Not yet done
 
-## CLI
-
-```
-typegraph-mcp <command> [options]
-
-  setup    Install plugin into the current project
-  remove   Uninstall from the current project
-  check    Run 12 health checks
-  test     Smoke test all 14 tools
-  bench    Run benchmarks (token, latency, accuracy)
-  start    Start the MCP server (stdin/stdout)
-
-  --yes                 Skip prompts
-  --clean-global-codex  Also remove a stale global Codex MCP entry for this project
-  --help                Show help
-```
-
-`remove` always cleans up project-local config. If it detects a legacy global `~/.codex/config.toml` entry that points at the current project, it will ask before removing it in interactive mode. In non-interactive mode, pass `--clean-global-codex` to allow that global cleanup.
-
-## Troubleshooting
-
-Run the health check first — it catches most issues:
-
-```bash
-npx typegraph-mcp check
-```
-
-| Symptom | Fix |
-|---|---|
-| Server won't start | `cd plugins/typegraph-mcp && npm install --include=optional` |
-| "Compatible tsserver not found" | Reinstall the plugin dependencies; TypeGraph uses the project's legacy tsserver when available and its bundled TypeScript 5 runtime for TypeScript 7 projects |
-| Tools return empty results | Check `TYPEGRAPH_TSCONFIG` points to the right tsconfig |
-| Broad project checks include plugins/ | Narrow the check command's input or ignore `plugins/`; setup does not edit `tsconfig.json` |
-| `@esbuild/*` or `@rollup/*` package missing | Reinstall with Node 22: `npm install --include=optional` |
-| "npm warn Unknown project config" | Safe to ignore — caused by pnpm settings in your `.npmrc` that npm doesn't recognize |
-
-## Manual MCP configuration
-
-### Codex CLI
-
-Add this to your project's `.codex/config.toml`:
-
-```toml
-[mcp_servers.typegraph]
-command = "/absolute/path/to/your-project/plugins/typegraph-mcp/node_modules/.bin/tsx"
-args = ["/absolute/path/to/your-project/plugins/typegraph-mcp/server.ts"]
-env = { TYPEGRAPH_PROJECT_ROOT = "/absolute/path/to/your-project", TYPEGRAPH_TSCONFIG = "/absolute/path/to/your-project/tsconfig.json" }
-```
-
-Using the plugin-local `tsx` binary avoids relying on `npx tsx` being resolvable when Codex launches the MCP server.
-
-Codex only loads project `.codex/config.toml` files for trusted projects. If needed, add this to `~/.codex/config.toml`:
-
-```toml
-[projects."/absolute/path/to/your-project"]
-trust_level = "trusted"
-```
-
-### JSON-based MCP clients
-
-Add to `.claude/mcp.json` (or `~/.claude/mcp.json` for global):
-
-```json
-{
-  "mcpServers": {
-    "typegraph": {
-      "command": "npx",
-      "args": ["tsx", "/absolute/path/to/typegraph-mcp/server.ts"],
-      "env": {
-        "TYPEGRAPH_PROJECT_ROOT": ".",
-        "TYPEGRAPH_TSCONFIG": "./tsconfig.json"
-      }
-    }
-  }
-}
-```
-
-`TYPEGRAPH_PROJECT_ROOT` resolves relative to the agent's working directory. The `args` path to `server.ts` must be absolute.
-
-## How it works
-
-```
-AI Agent ─── stdin/stdout ─── MCP Server ─┬── tsserver (child process)
-              MCP protocol                │     type-aware point queries
-                                          └── module-graph (in-process)
-                                                oxc-parser + oxc-resolver
-                                                structural graph queries
-```
-
-Two subsystems start concurrently:
-
-1. **tsserver** — child process for semantic queries. Communicates via pipes using tsserver's JSON protocol. Auto-restarts on crash (up to 3 times).
-
-2. **Module graph** — in-process import graph built with [oxc-parser](https://github.com/nicolo-ribaudo/oxc-parser) and [oxc-resolver](https://github.com/nicolo-ribaudo/oxc-resolver). Incrementally updated via `fs.watch`.
-
-**Monorepo support** — resolves through `composite` project references, maps `dist/` back to source, handles `extensionAlias` for `.js` → `.ts` mapping, and follows cross-package barrel re-exports.
-
-## Contributing
-
-### Setup from source
-
-```bash
-git clone https://github.com/guyowen/typegraph-mcp.git
-cd typegraph-mcp
-nvm use
-npm install --include=optional
-```
-
-To install the current checkout into itself for Claude Code and Codex CLI:
-
-```bash
-npm run setup:self
-```
-
-The wrapper invokes the local `cli.ts`. In a Git worktree it first adds every generated
-plugin, skill, MCP configuration, and agent-instruction path to `.gitignore`.
-
-### Run locally against a project
-
-```bash
-cd /path/to/your-ts-project
-npx tsx ~/typegraph-mcp/cli.ts setup
-```
-
-Or start the MCP server directly:
-
-```bash
-TYPEGRAPH_PROJECT_ROOT=/path/to/project TYPEGRAPH_TSCONFIG=/path/to/project/tsconfig.json npx tsx ~/typegraph-mcp/server.ts
-```
-
-### Load as a Claude Code plugin (from source)
-
-```bash
-claude --plugin-dir ~/typegraph-mcp
-```
-
-### Verify your changes
-
-```bash
-npx tsx ~/typegraph-mcp/cli.ts check    # 12 health checks
-npx tsx ~/typegraph-mcp/cli.ts test     # smoke test all 14 tools
-```
-
-### Build compiled output
-
-```bash
-npm run build    # compiles to dist/ via tsup
-```
-
-### Branch workflow
-
-- **`dev`** — all work happens here
-- **`main`** — merge to main triggers CI: auto-bumps patch version, publishes to npm via OIDC trusted publishers
-
-## Known limitations
-
-- **Object literal property keys** (e.g., RPC handler names) are not indexed by tsserver's `navto`. Use `ts_find_symbol` with a specific file, or pass the `file` hint to `ts_navigate_to`.
-- **First query latency** — ~2s as tsserver loads the project. Subsequent queries: 1-60ms.
-- **Memory** — tsserver holds the project in memory. For very large monorepos (1000+ files), expect ~200-500MB RSS.
+- Gemini CLI has no MCP registration path (`mcp: { kind: "none" }`)
+- The oxc module graph has its own `startWatcher`, currently unused by the server — graph tools rebuild per session
+- `fs.watch({recursive:true})` is fine on macOS/Windows and Linux ≥20, but unwatched failures degrade silently to "snapshot as of last explicit refresh"

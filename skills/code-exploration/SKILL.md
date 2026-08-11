@@ -17,12 +17,16 @@ Efficiently explore unfamiliar TypeScript code using navigation tools instead of
 ## Workflow
 
 ### Step 1: Find the Entry Point
+If this is the first TypeGraph call in the session and project targeting is uncertain:
+- Call `ts_project_info` to confirm the project root, tsconfig, backend, and graph/index sizes
+
 If you know the symbol name but not the file:
 - Call `ts_navigate_to` with the symbol name
 
 If you know the file:
 - Call `ts_module_exports` to see what the file provides
 - Call `ts_find_symbol` to locate a specific symbol within it
+- Call `ts_document_symbols` when the interesting code is likely a route table, RPC handler map, object-literal key, or nested member
 
 If `ts_module_exports` on a top-level `index.ts` is empty or mostly re-exports:
 - Treat it as a barrel, not a dead end
@@ -30,7 +34,9 @@ If `ts_module_exports` on a top-level `index.ts` is empty or mostly re-exports:
 - Use `ts_dependency_tree` on that composition module to get quick architectural context
 
 ### Step 2: Understand the Type
-Call `ts_type_info` on the entry point symbol. This gives you the full type signature and documentation without reading the entire file.
+Call `ts_symbol_overview` on the entry point symbol when you need the definition, type, and reference footprint together.
+
+Call `ts_type_info` when you only need the type signature and documentation.
 
 ### Step 3: Trace the Implementation
 Call `ts_trace_chain` to follow the definition chain from the entry point to the implementation. Each hop shows the file, line, and a code preview.
@@ -55,7 +61,7 @@ User: "How does the magic link authentication flow work?"
 1. ts_navigate_to({ symbol: "MagicLinkHandler" })
    -> Found in apps/core-api/src/entrypoints/magic-link.ts
 
-2. ts_type_info -> Shows handler signature with ClaimToken input, AuthResult output
+2. ts_symbol_overview -> Shows handler signature, definition, and reference footprint
 
 3. ts_trace_chain -> 4 hops:
    magic-link.ts -> ClaimService.ts -> TokenRepository.ts -> tenant-context.ts

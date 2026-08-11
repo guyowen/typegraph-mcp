@@ -1,7 +1,7 @@
 {
   "name": "typegraph-mcp",
   "version": "0.9.48",
-  "description": "Type-aware codebase navigation for AI coding agents — 14 MCP tools powered by tsserver + oxc",
+  "description": "Type-aware codebase navigation for AI coding agents — MCP tools powered by tsgo (TypeScript 7) via @effect/tsgo --api + oxc",
   "license": "MIT",
   "type": "module",
   "repository": {
@@ -10,45 +10,43 @@
   },
   "packageManager": "npm@11.5.2",
   "engines": {
-    "node": ">=22"
+    "node": ">=22.18"
   },
+  "//engines": "22.18 is the minimum Node runtime. Source-mode development uses native TypeScript type stripping; published packages run compiled dist/ entrypoints.",
   "bin": {
-    "typegraph-mcp": "./dist/cli.js",
-    "typegraph": "./dist/cli.js"
+    "typegraph-mcp": "./dist/cli.cjs",
+    "typegraph": "./dist/cli.cjs",
+    "typegraph-mcp-server": "./dist/server.cjs"
   },
+  "//bin": "Three names, no flag. The -server name IS the stdio server, so an MCP entry never has to name a subcommand or a path inside the package. The package-name bin is the installer for humans and serves MCP when stdio is piped. `typegraph` is the predecessor compatibility alias. The .cjs trampolines validate Node before importing the compiled implementation.",
   "files": [
-    "*.ts",
+    "dist/",
     "*.json",
     "README.md",
     "LICENSE",
-    "package-lock.json",
-    "skills/",
-    "commands/",
-    "hooks/",
-    "scripts/",
-    ".claude-plugin/",
-    ".cursor-plugin/",
-    "gemini-extension.json",
-    "dist/"
+    "skills/"
   ],
   "scripts": {
-    "build": "tsup",
-    "setup:self": "tsx scripts/self-install.ts",
-    "start": "tsx server.ts",
-    "test": "tsx tests/smoke-test-selection-test.ts && tsx tests/biome-config-test.ts && tsx tests/self-install-test.ts && tsx tests/tsserver-resolution-test.ts && tsx tests/export-surface-test.ts && tsx tests/engine-sync-test.ts && tsx tests/install-oxlint-test.ts",
-    "check": "tsx check.ts"
+    "build": "node -e \"fs.rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.build.json && node scripts/copy-cjs.mjs",
+    "prepack": "npm run build",
+    "start": "node src/server.cjs",
+    "check": "node src/check.cjs",
+    "test": "node tests/agents-test.ts && node tests/skills-install-test.ts && node tests/cli-install-test.ts && node tests/cli-dispatch-test.ts && node tests/navigate-params-test.ts && node tests/invalidation-test.ts && node tests/check-project-test.ts",
+    "//test:e2e": "Requires a real TS project: npm run test:e2e -- /path/to/project",
+    "test:e2e": "node tests/server-smoke.ts",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@effect/tsgo": "^0.32.1",
     "@clack/prompts": "^1.0.1",
     "@modelcontextprotocol/sdk": "^1.26.0",
     "oxc-parser": "^0.114.0",
     "oxc-resolver": "^11.17.1",
-    "typescript": "^5.9.3",
+    "typescript": "7.0.2",
     "zod": "^4.3.6"
   },
   "devDependencies": {
-    "@types/node": "^25.3.0",
-    "tsup": "^8.5.0",
-    "tsx": "^4.21.0"
-  }
+    "@types/node": "^25.3.0"
+  },
+  "//typescript": "Pinned EXACT, not ranged. The tsgo --api wire protocol has no version handshake and its encoders are code-generated, so a client/server mismatch surfaces as msgpack decode errors rather than a clean error. 7.0.2 is the version @effect/tsgo pins on its `latest` channel (upstream.json -> gitHead 2bd066d). src/version-guard.ts asserts these still agree at runtime."
 }

@@ -16,22 +16,25 @@ Verify a refactor is safe before making changes by checking call chains, circula
 
 ## Workflow
 
-### Step 1: Trace the Chain
+### Step 1: Symbol Overview
+Call `ts_symbol_overview` on the symbol being refactored. This gives the definition, type, reference footprint, and grouped blast radius in one response.
+
+### Step 2: Trace the Chain
 Call `ts_trace_chain` on the symbol being refactored to understand its full definition chain. This reveals all the layers of indirection the refactor needs to preserve.
 
-### Step 2: Check for Cycles
+### Step 3: Check for Cycles
 Call `ts_import_cycles` filtered to the file being refactored. If the file participates in a cycle, the refactor must not break or worsen it.
 
-### Step 3: Assess Boundaries
+### Step 4: Assess Boundaries
 Call `ts_module_boundary` with the files involved in the refactor (source + destination). Check:
 - **Incoming edges**: Other code that imports from these files (must be preserved)
 - **Outgoing edges**: Dependencies these files need (must be available at new location)
 - **Isolation score**: How self-contained the module is
 
-### Step 4: Verify References
-Call `ts_references` on the key symbol to get the complete list of call sites that need updating.
+### Step 5: Verify References
+Use the references from `ts_symbol_overview`. Call `ts_references` separately only when you need the full raw list after the overview summary.
 
-### Step 5: Report
+### Step 6: Report
 Present a safety assessment:
 1. **Definition chain** (what indirection exists)
 2. **Cycle involvement** (any circular dependencies to be aware of)
@@ -44,10 +47,10 @@ Present a safety assessment:
 ```
 User: "I want to move AuthService from packages/core to apps/gateway"
 
-1. ts_trace_chain -> AuthService defined in core, consumed via Layer in gateway
-2. ts_import_cycles -> No cycles involving AuthService.ts
-3. ts_module_boundary -> 12 incoming edges (other core modules import it), 3 outgoing
-4. ts_references -> 23 references across 15 files
+1. ts_symbol_overview -> AuthService has 23 references across 15 files
+2. ts_trace_chain -> AuthService defined in core, consumed via Layer in gateway
+3. ts_import_cycles -> No cycles involving AuthService.ts
+4. ts_module_boundary -> 12 incoming edges (other core modules import it), 3 outgoing
 
 CAUTION: AuthService has 12 incoming edges within packages/core.
          Moving it to apps/gateway would break the core -> gateway dependency direction.

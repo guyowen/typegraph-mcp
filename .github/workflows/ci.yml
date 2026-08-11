@@ -14,9 +14,12 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: 22
+          node-version: 24
 
       - run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
 
       - name: Test
         run: npm test
@@ -24,11 +27,19 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Verify compiled CLI loads
-        run: node dist/cli.js --help
+      - name: Health check
+        run: npm run check
+
+      - name: Verify public bins load
+        run: |
+          node dist/cli.cjs --help
+          node dist/cli.cjs check
 
       - name: Verify compiled modules parse
-        run: node --check dist/server.js && node --check dist/cli.js
+        run: find dist -maxdepth 1 \( -name '*.js' -o -name '*.cjs' \) -exec node --check {} \;
+
+      - name: Verify npm package contents
+        run: npm pack --dry-run
 
   publish:
     needs: validate
@@ -48,11 +59,11 @@ jobs:
 
       - run: npm ci
 
-      - name: Build
-        run: npm run build
-
       - name: Bump patch version
         run: npm version patch --no-git-tag-version
+
+      - name: Build
+        run: npm run build
 
       - name: Publish to npm
         run: npm publish --provenance --access public

@@ -21,7 +21,7 @@ Follow the phases below in order. Each phase produces findings.
 
 **Report output:** Write a markdown report to `<project_root>/typegraph-exploration-report.md` as you go. After each phase checkpoint, append that phase's findings to the report. Structure the report with the same phase headings used below. Include raw data (file counts, edge counts, cycle lists, blast radius numbers) alongside your interpretive analysis.
 
-**Tool usage:** Call typegraph-mcp tools via the MCP tool interface (e.g., `ts_dependency_tree`, `ts_import_cycles`, etc.). Use `Glob` and `Grep` for file discovery steps. Use `Read` sparingly — only when a phase explicitly requires reading source to verify a hypothesis. The point is to learn as much as possible *from the graph* before reading code.
+**Tool usage:** Call typegraph-mcp tools via the MCP tool interface (e.g., `ts_project_info`, `ts_dependency_tree`, `ts_import_cycles`, etc.). Use `Glob` and `Grep` for file discovery steps. Use `Read` sparingly — only when a phase explicitly requires reading source to verify a hypothesis. The point is to learn as much as possible *from the graph* before reading code.
 
 **Parallelism:** Within each phase, make independent tool calls in parallel. Between phases, respect the sequencing — later phases depend on earlier findings.
 
@@ -31,13 +31,25 @@ Follow the phases below in order. Each phase produces findings.
 
 Run the health check first:
 ```bash
-"__TYPEGRAPH_NODE__" "${CLAUDE_PLUGIN_ROOT}/node_modules/tsx/dist/cli.mjs" "${CLAUDE_PLUGIN_ROOT}/cli.ts" check
+"__TYPEGRAPH_NODE__" "__TYPEGRAPH_CHECK__"
 ```
 
-Record three numbers from the output:
+<!-- Both placeholders are substituted with absolute paths at install time by
+     src/install-skills.ts. Do NOT use ${CLAUDE_PLUGIN_ROOT} here: nothing
+     expands it. Only Claude Code ever did, and only for skills discovered from
+     a plugin directory — which this installer no longer creates. -->
+
+
+Then run:
+```
+ts_project_info()
+```
+
+Record these numbers from the health check and project info:
 - **File count** — calibrates expectations (200 files = afternoon, 2000 = days)
 - **Edge count** — total import relationships
 - **Edge density** (edges / files) — coupling indicator (<2 = loosely coupled, 2-3 = moderate, >4 = tightly coupled)
+- **tsconfig + backend** — confirms the MCP server is analyzing the intended project
 
 ---
 
@@ -172,8 +184,19 @@ ts_navigate_to(symbol: "Live")          // How many live implementations?
 ts_navigate_to(symbol: "Repository")    // Is there a repository pattern?
 ```
 
+**Read `exportHits`, not the length of `matches`.** The returned list is trimmed to `maxResults` (default 10) so a survey does not flood its own context; `exportHits` is the real count and is unaffected by that trim. Counting the list instead would report 10 for every pattern.
+
 High counts (20+) across many files = intentional, project-wide convention.
 Low counts (2-3) in one directory = localized experiment or one-off.
+
+**Do not pass `includeLocals: true` for these prevalence queries.** The default export-symbol search returns exact, uncapped counts, which is what makes the comparison above meaningful. The `includeLocals` path is capped at 256, so on a large codebase every one of these queries would saturate to the same number and the comparison would silently produce a confidently wrong conclusion.
+
+Two flags in the response mean different things, and confusing them ruins the analysis:
+
+| Flag | Meaning | Action |
+|---|---|---|
+| `localsTruncated: true` | the 256 cap was hit — `localHits` is a floor | discard `localHits`; `exportHits` is still exact |
+| `listTrimmed: true` | `maxResults` shortened the list only | ignore — every count still describes the full set |
 
 ### 3c. Test layer coverage — which services are testable?
 
@@ -213,17 +236,17 @@ For files with 0 dependents, you're done — the whole file is dead. For files t
 
 Take high-export files from Phase 2b (those with 10+ exports) and run:
 ```
-ts_references(file: "<file>", symbol: "<exported_symbol>")
+ts_dead_exports(file: "<file>")
 ```
 
-...for each export. Exports with 0-1 references (only the export itself) are dead exports. This is tedious for large files, so prioritize:
+This is still a candidate list, not deletion authority: use `ts_references` to spot-check anything surprising before removing it. Prioritize:
 - Files that feel overstuffed (15+ exports)
 - Barrel/index files (which may re-export symbols nothing actually uses)
 - Files in directories flagged as potentially stale
 
 ### 4c. Barrel file audit
 
-Barrel files (`index.ts` that re-export from submodules) often accumulate dead re-exports. Run `ts_module_exports` on each barrel, then spot-check with `ts_references` on exports that seem obscure or oddly named.
+Barrel files (`index.ts` that re-export from submodules) often accumulate dead re-exports. Run `ts_dead_exports` on each barrel, then spot-check with `ts_references` on exports that seem obscure or oddly named.
 
 **Checkpoint:** You have a list of confirmed dead files and dead exports that can be safely removed.
 
