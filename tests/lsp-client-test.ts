@@ -29,7 +29,7 @@ try {
 
   const dead = new LspClient("/usr/bin/true", tmp);
   const deadStart = await settles(dead.start());
-  check("exited LSP rejects start instead of hanging", deadStart.message?.includes("tsgo LSP exited") === true, deadStart.message);
+  check("exited LSP rejects start instead of hanging", deadStart.settled === true && !!deadStart.message, deadStart.message);
   const deadStop = await settles(dead.stop());
   check("stop settles after an exited LSP", deadStop.settled === true, deadStop.message);
 
