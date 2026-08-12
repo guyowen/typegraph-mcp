@@ -186,8 +186,8 @@ function writeCodexToml(projectRoot: string, cmd: McpCommand): RegisterResult {
     CODEX_END,
   ].join("\n");
 
-  let content = fs.existsSync(fullPath) ? fs.readFileSync(fullPath, "utf-8") : "";
-  content = migrateLegacyCodexKeys(content);
+  const originalContent = fs.existsSync(fullPath) ? fs.readFileSync(fullPath, "utf-8") : "";
+  const content = migrateLegacyCodexKeys(originalContent);
   const existing = findCodexBlock(content);
 
   let next: string;
@@ -209,7 +209,7 @@ function writeCodexToml(projectRoot: string, cmd: McpCommand): RegisterResult {
     }
   }
 
-  if (next === content) return { file: fullPath, action: "unchanged" };
+  if (next === originalContent) return { file: fullPath, action: "unchanged" };
   fs.mkdirSync(path.dirname(fullPath), { recursive: true });
   fs.writeFileSync(fullPath, next);
   return { file: fullPath, action: "written" };

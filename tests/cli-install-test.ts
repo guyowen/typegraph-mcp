@@ -231,6 +231,17 @@ console.log("\nagent instruction files");
 check("CLAUDE.md snippet", fs.readFileSync(path.join(tmp, "CLAUDE.md"), "utf-8").includes("TypeScript Navigation"));
 check("AGENTS.md snippet", fs.readFileSync(path.join(tmp, "AGENTS.md"), "utf-8").includes("TypeScript Navigation"));
 
+console.log("\nlegacy sentinel migration");
+const codexPath = path.join(tmp, ".codex/config.toml");
+fs.writeFileSync(
+  codexPath,
+  fs.readFileSync(codexPath, "utf-8").replaceAll("mcp_servers.typegraph-mcp", "mcp_servers.typegraph"),
+);
+run("setup", "--yes");
+const migratedToml = fs.readFileSync(codexPath, "utf-8");
+check("current legacy block is persisted under the new name", migratedToml.includes("[mcp_servers.typegraph-mcp]"));
+check("current legacy block is removed", !migratedToml.includes("[mcp_servers.typegraph]"));
+
 console.log("\nidempotence");
 const before = fs.readFileSync(path.join(tmp, "CLAUDE.md"), "utf-8");
 run("setup", "--yes");
