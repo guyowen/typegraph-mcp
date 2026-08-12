@@ -79,7 +79,7 @@ function collectInstalled(projectRoot: string): InstalledEntry[] {
 
   const codex = path.resolve(projectRoot, ".codex/config.toml");
   if (fs.existsSync(codex)) {
-    const block = /\[mcp_servers\.typegraph\]([\s\S]*?)(?=\n\[|$)/.exec(
+    const block = new RegExp(`\\[mcp_servers\\.${SERVER_KEY}\\]([\\s\\S]*?)(?=\\n\\[|$)`).exec(
       fs.readFileSync(codex, "utf-8"),
     )?.[1];
     if (block) {

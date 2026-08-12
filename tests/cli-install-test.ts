@@ -35,7 +35,10 @@ fs.writeFileSync(
   // OpenCode config with comments — JSON.parse would throw here
   "$schema": "https://opencode.ai/config.json",
   "model": "anthropic/claude-sonnet-5", // trailing comment
-  "instructions": ["see https://example.com//docs"]
+  "instructions": ["see https://example.com//docs"],
+  "mcp": {
+    "typegraph": { "type": "local", "command": ["node", "legacy-server.js"] }
+  }
 }
 `,
 );
@@ -89,7 +92,7 @@ fs.writeFileSync(
 // that bit: no sentinels to find, so setup appended a second
 // [mcp_servers.typegraph] and TOML's duplicate-key rule stopped Codex from
 // parsing its config at all. The `other` table below must survive the rewrite,
-// and the tools subtable must not be orphaned.
+// and the tools subtable must migrate with the server name.
 fs.mkdirSync(path.join(tmp, ".codex"), { recursive: true });
 fs.writeFileSync(
   path.join(tmp, ".codex/config.toml"),
@@ -166,35 +169,39 @@ check("skill points at the real package root", claudeSkill.includes(repoRoot));
 
 console.log("\nMCP registration");
 const mcp = readJson(".mcp.json");
-check("project .mcp.json written (Claude Code)", !!mcp.mcpServers?.typegraph);
+const mcpServer = mcp.mcpServers?.["typegraph-mcp"];
+check("project .mcp.json written as typegraph-mcp (Claude Code)", !!mcpServer);
+check("legacy project server name absent", !mcp.mcpServers?.typegraph);
 check(
   "not a plugin .mcp.json",
   !fs.existsSync(path.join(tmp, "plugins/typegraph-mcp/.mcp.json")),
 );
 check(
   "server path is absolute while the package is not a dependency",
-  path.isAbsolute(mcp.mcpServers?.typegraph?.args?.[0] ?? ""),
-  mcp.mcpServers?.typegraph?.args?.[0],
+  path.isAbsolute(mcpServer?.args?.[0] ?? ""),
+  mcpServer?.args?.[0],
 );
 check(
   "server path exists on disk",
-  fs.existsSync(path.resolve(tmp, mcp.mcpServers.typegraph.args[0])),
+  fs.existsSync(path.resolve(tmp, mcpServer.args[0])),
 );
 
 const cursor = readJson(".cursor/mcp.json");
-check("cursor mcp.json written", !!cursor.mcpServers?.typegraph);
+check("cursor mcp.json written", !!cursor.mcpServers?.["typegraph-mcp"]);
 
 const oc = readJson("opencode.jsonc");
-check("opencode.jsonc parsed despite comments", !!oc.mcp?.typegraph, "entry present");
-check("opencode entry uses type:local", oc.mcp?.typegraph?.type === "local", oc.mcp?.typegraph?.type);
+const ocServer = oc.mcp?.["typegraph-mcp"];
+check("opencode.jsonc parsed despite comments", !!ocServer, "entry present");
+check("legacy OpenCode server name removed", !oc.mcp?.typegraph);
+check("opencode entry uses type:local", ocServer?.type === "local", ocServer?.type);
 check(
   "opencode command is ONE array",
-  Array.isArray(oc.mcp?.typegraph?.command) && oc.mcp.typegraph.command.length === 2,
-  JSON.stringify(oc.mcp?.typegraph?.command),
+  Array.isArray(ocServer?.command) && ocServer.command.length === 2,
+  JSON.stringify(ocServer?.command),
 );
 check(
   "no tsx in the invocation (plain node trampoline)",
-  !JSON.stringify(oc.mcp?.typegraph?.command).includes("tsx"),
+  !JSON.stringify(ocServer?.command).includes("tsx"),
 );
 check("existing user config preserved", oc.model === "anthropic/claude-sonnet-5", oc.model);
 check(
@@ -204,19 +211,20 @@ check(
 );
 
 const toml = fs.readFileSync(path.join(tmp, ".codex/config.toml"), "utf-8");
-check("codex toml block written", toml.includes("[mcp_servers.typegraph]"));
+check("codex toml block written", toml.includes("[mcp_servers.typegraph-mcp]"));
+check("legacy Codex server name absent", !toml.includes("[mcp_servers.typegraph]"));
 const tableCount = (s: string, header: string): number => s.split(`\n${header}`).length - 1;
 check(
   "hand-rolled table adopted, not duplicated (TOML duplicate key)",
-  tableCount(`\n${toml}`, "[mcp_servers.typegraph]") === 1,
-  `${tableCount(`\n${toml}`, "[mcp_servers.typegraph]")} occurrences`,
+  tableCount(`\n${toml}`, "[mcp_servers.typegraph-mcp]") === 1,
+  `${tableCount(`\n${toml}`, "[mcp_servers.typegraph-mcp]")} occurrences`,
 );
 check("adopted table is now sentinel-wrapped", toml.includes("# >>> typegraph-mcp >>>"));
 check("stale legacy server path gone", !toml.includes("plugins/typegraph-mcp/server.ts"));
 check("unrelated project Codex entry preserved", toml.includes("[mcp_servers.other]"));
 check(
-  "typegraph subtable preserved",
-  toml.includes("[mcp_servers.typegraph.tools.ts_find_symbol]"),
+  "typegraph-mcp subtable migrated",
+  toml.includes("[mcp_servers.typegraph-mcp.tools.ts_find_symbol]"),
 );
 
 console.log("\nagent instruction files");
@@ -240,24 +248,25 @@ fs.writeFileSync(path.join(dep, "dist/check.cjs"), "// stand-in\n");
 run("setup", "--yes");
 
 const mcpDep = readJson(".mcp.json");
+const mcpDepServer = mcpDep.mcpServers?.["typegraph-mcp"];
 check(
   "server path is now project-relative",
-  mcpDep.mcpServers?.typegraph?.args?.[0] === path.join("node_modules", "typegraph-mcp", "dist", "server.cjs"),
-  mcpDep.mcpServers?.typegraph?.args?.[0],
+  mcpDepServer?.args?.[0] === path.join("node_modules", "typegraph-mcp", "dist", "server.cjs"),
+  mcpDepServer?.args?.[0],
 );
 check(
   "relative path resolves against the project root",
-  fs.existsSync(path.resolve(tmp, mcpDep.mcpServers.typegraph.args[0])),
+  fs.existsSync(path.resolve(tmp, mcpDepServer.args[0])),
 );
 check(
   "TYPEGRAPH_PROJECT_ROOT is '.' for a project-scoped config",
-  mcpDep.mcpServers?.typegraph?.env?.TYPEGRAPH_PROJECT_ROOT === ".",
+  mcpDepServer?.env?.TYPEGRAPH_PROJECT_ROOT === ".",
 );
 const ocDep = readJson("opencode.jsonc");
 check(
   "opencode picks up the relative path too",
-  ocDep.mcp?.typegraph?.command?.[1] === path.join("node_modules", "typegraph-mcp", "dist", "server.cjs"),
-  ocDep.mcp?.typegraph?.command?.[1],
+  ocDep.mcp?.["typegraph-mcp"]?.command?.[1] === path.join("node_modules", "typegraph-mcp", "dist", "server.cjs"),
+  ocDep.mcp?.["typegraph-mcp"]?.command?.[1],
 );
 const skillAfter = fs.readFileSync(path.join(tmp, ".claude/skills/deep-survey/SKILL.md"), "utf-8");
 check("skills re-templated to the installed copy", skillAfter.includes(dep));
@@ -266,14 +275,14 @@ console.log("\nremove");
 run("remove");
 check(".claude/skills cleaned", !fs.existsSync(path.join(tmp, ".claude/skills/tool-selection")));
 check(".agents/skills cleaned", !fs.existsSync(path.join(tmp, ".agents/skills/tool-selection")));
-check(".mcp.json entry deregistered", !readJson(".mcp.json").mcpServers?.typegraph);
-check(".cursor/mcp.json entry deregistered", !readJson(".cursor/mcp.json").mcpServers?.typegraph);
+check(".mcp.json entry deregistered", !readJson(".mcp.json").mcpServers?.["typegraph-mcp"]);
+check(".cursor/mcp.json entry deregistered", !readJson(".cursor/mcp.json").mcpServers?.["typegraph-mcp"]);
 const ocAfter = readJson("opencode.jsonc");
-check("opencode entry deregistered", !ocAfter.mcp?.typegraph);
+check("opencode entry deregistered", !ocAfter.mcp?.["typegraph-mcp"]);
 check("user config still intact after remove", ocAfter.model === "anthropic/claude-sonnet-5");
 check(
   "codex block removed",
-  !fs.readFileSync(path.join(tmp, ".codex/config.toml"), "utf-8").includes("[mcp_servers.typegraph]"),
+  !fs.readFileSync(path.join(tmp, ".codex/config.toml"), "utf-8").includes("[mcp_servers.typegraph-mcp]"),
 );
 check(
   "CLAUDE.md snippet removed",

@@ -27,7 +27,9 @@ import {
 import { serverArgFor, type ServerTarget } from "./install-paths.ts";
 import { readConfig } from "./jsonc.ts";
 
-export const SERVER_KEY = "typegraph";
+export const SERVER_KEY = "typegraph-mcp";
+const LEGACY_SERVER_KEY = "typegraph";
+const MANAGED_SERVER_KEYS = [SERVER_KEY, LEGACY_SERVER_KEY] as const;
 
 export interface RegisterResult {
   file: string;
@@ -64,10 +66,12 @@ function writeJsonConfig(
 
   const servers = (config[rootKey] as Record<string, unknown>) ?? {};
   const before = JSON.stringify(servers[SERVER_KEY]);
+  const hadLegacyEntry = LEGACY_SERVER_KEY in servers;
   servers[SERVER_KEY] = entry;
+  delete servers[LEGACY_SERVER_KEY];
   config[rootKey] = servers;
 
-  if (before === JSON.stringify(entry)) {
+  if (before === JSON.stringify(entry) && !hadLegacyEntry) {
     return { file: fullPath, action: "unchanged" };
   }
 
@@ -99,16 +103,38 @@ function findCodexBlock(content: string): { begin: number; end: number; endMarke
   return undefined;
 }
 
-/** `typegraph`, `"typegraph"`, or `'typegraph'` — TOML allows all three. */
-const KEY_FORMS = String.raw`(?:${SERVER_KEY}|"${SERVER_KEY}"|'${SERVER_KEY}')`;
+/** Bare, basic-string, or literal-string forms of a TOML key. */
+const keyForms = (key: string): string => String.raw`(?:${key}|"${key}"|'${key}')`;
+const KEY_FORMS = keyForms(SERVER_KEY);
+const LEGACY_KEY_FORMS = keyForms(LEGACY_SERVER_KEY);
 const BARE_TABLE_RE = new RegExp(
   String.raw`^[ \t]*\[[ \t]*mcp_servers[ \t]*\.[ \t]*${KEY_FORMS}[ \t]*\][ \t]*$`,
   "m",
 );
 const NEXT_HEADER_RE = /^[ \t]*\[/m;
 
+function migrateLegacyCodexKeys(content: string): string {
+  const tableHeader = new RegExp(
+    String.raw`(^[ \t]*\[[ \t]*mcp_servers[ \t]*\.[ \t]*)${LEGACY_KEY_FORMS}([ \t]*(?:\.|\]))`,
+    "gm",
+  );
+  let next = content.replace(tableHeader, `$1${SERVER_KEY}$2`);
+
+  const section = /^[ \t]*\[[ \t]*mcp_servers[ \t]*\][ \t]*$/m.exec(next);
+  if (!section) return next;
+  const bodyStart = section.index + section[0].length;
+  const rest = next.slice(bodyStart);
+  const nextHeader = NEXT_HEADER_RE.exec(rest);
+  const bodyEnd = nextHeader ? bodyStart + nextHeader.index : next.length;
+  const body = next.slice(bodyStart, bodyEnd).replace(
+    new RegExp(String.raw`^([ \t]*)${LEGACY_KEY_FORMS}([ \t]*[.=])`, "gm"),
+    `$1${SERVER_KEY}$2`,
+  );
+  return next.slice(0, bodyStart) + body + next.slice(bodyEnd);
+}
+
 /**
- * A `[mcp_servers.typegraph]` table this installer didn't write — hand-rolled,
+ * A `[mcp_servers.typegraph-mcp]` table this installer didn't write — hand-rolled,
  * or left by a version that predates the sentinels.
  *
  * It carries no markers, so the sentinel scan misses it and we would append a
@@ -117,7 +143,7 @@ const NEXT_HEADER_RE = /^[ \t]*\[/m;
  * and stops launching. Overwrite the bare table in place instead.
  *
  * The span stops at the next table header, which preserves any
- * `[mcp_servers.typegraph.tools.*]` subtables — those are distinct keys, and
+ * `[mcp_servers.typegraph-mcp.tools.*]` subtables — those are distinct keys, and
  * TOML permits a super-table to be defined ahead of them.
  */
 function findBareTypegraphTable(content: string): { begin: number; end: number } | undefined {
@@ -132,7 +158,7 @@ function findBareTypegraphTable(content: string): { begin: number; end: number }
 }
 
 /**
- * `[mcp_servers]` carrying an inline `typegraph = { ... }` key collides exactly
+ * `[mcp_servers]` carrying an inline `typegraph-mcp = { ... }` key collides exactly
  * the same way, but can't be rewritten by span — the enclosing table isn't ours
  * to replace. Bail loudly rather than emit a file the agent refuses to parse.
  */
@@ -161,6 +187,7 @@ function writeCodexToml(projectRoot: string, cmd: McpCommand): RegisterResult {
   ].join("\n");
 
   let content = fs.existsSync(fullPath) ? fs.readFileSync(fullPath, "utf-8") : "";
+  content = migrateLegacyCodexKeys(content);
   const existing = findCodexBlock(content);
 
   let next: string;
@@ -261,8 +288,8 @@ export function deregisterMcp(projectRoot: string): string[] {
     const config = readConfig(fs, fullPath);
     if (!config) continue;
     const servers = config[reg.rootKey] as Record<string, unknown> | undefined;
-    if (!servers?.[SERVER_KEY]) continue;
-    delete servers[SERVER_KEY];
+    if (!servers || !MANAGED_SERVER_KEYS.some((key) => key in servers)) continue;
+    for (const key of MANAGED_SERVER_KEYS) delete servers[key];
     fs.writeFileSync(fullPath, JSON.stringify(config, null, 2) + "\n");
     removed.push(fullPath);
   }
