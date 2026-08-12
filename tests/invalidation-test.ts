@@ -6,12 +6,13 @@
  * a restart.
  */
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
 const repoRoot = path.resolve(import.meta.dirname, "..");
-const tmp = fs.mkdtempSync(path.join("/private/tmp", "tg-inval-"));
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tg-inval-"));
 
 fs.mkdirSync(path.join(tmp, "src"), { recursive: true });
 fs.mkdirSync(path.join(tmp, "node_modules"), { recursive: true });

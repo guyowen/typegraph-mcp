@@ -15,11 +15,12 @@
  * silently skipped (JSON.parse throws -> warn -> no MCP registration).
  */
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 
 const repoRoot = path.resolve(import.meta.dirname, "..");
-const tmp = fs.mkdtempSync(path.join("/private/tmp", "tg-cli-"));
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tg-cli-"));
 
 // ─── seed a project ──────────────────────────────────────────────────────────
 fs.mkdirSync(path.join(tmp, "src"), { recursive: true });

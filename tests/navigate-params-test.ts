@@ -15,11 +15,12 @@
  *    rejected the LSP-primary design over.
  */
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { ApiClient } from "../src/api-client.ts";
 import { NavigateTo, DEFAULT_MAX_RESULTS } from "../src/navigate-to.ts";
 
-const tmp = fs.mkdtempSync(path.join("/private/tmp", "tg-nav-"));
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tg-nav-"));
 const repoRoot = path.resolve(import.meta.dirname, "..");
 
 fs.mkdirSync(path.join(tmp, "src"), { recursive: true });

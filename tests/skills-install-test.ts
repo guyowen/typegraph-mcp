@@ -10,6 +10,7 @@
  */
 import assert from "node:assert";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import {
   CHECK_PLACEHOLDER,
@@ -24,7 +25,7 @@ import { resolveInterpreter } from "../src/install-paths.ts";
 import type { SkillsDir } from "../src/agents.ts";
 
 const sourceDir = path.resolve(import.meta.dirname, "..");
-const tmp = fs.mkdtempSync(path.join("/private/tmp", "tg-skills-"));
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tg-skills-"));
 // Stand in for a real dependency install: the package the skills must invoke
 // is not the same directory the skills are written to.
 const packageRoot = path.join(tmp, "node_modules", "typegraph-mcp");
