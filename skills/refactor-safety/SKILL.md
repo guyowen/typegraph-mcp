@@ -13,11 +13,14 @@ Verify a refactor is safe before making changes by checking call chains, circula
 - User asks "is it safe to refactor X?"
 - Before extracting code into a new module or package
 - Before changing an interface or service definition
+- Before applying Effect-specific mechanical rewrites or quick fixes
 
 ## Workflow
 
 ### Step 1: Symbol Overview
 Call `ts_symbol_overview` on the symbol being refactored. This gives the definition, type, reference footprint, and grouped blast radius in one response.
+
+For Effect values, call `ts_hover` to inspect the editor-style channel presentation. For Layer values, call `ts_layer_hover` to inspect the Layer graph before changing composition.
 
 ### Step 2: Trace the Chain
 Call `ts_trace_chain` on the symbol being refactored to understand its full definition chain. This reveals all the layers of indirection the refactor needs to preserve.
@@ -34,7 +37,10 @@ Call `ts_module_boundary` with the files involved in the refactor (source + dest
 ### Step 5: Verify References
 Use the references from `ts_symbol_overview`. Call `ts_references` separately only when you need the full raw list after the overview summary.
 
-### Step 6: Report
+### Step 6: Use LSP Diagnostics / Actions For Effect Rewrites
+When the refactor is motivated by Effect diagnostics or idioms, call `ts_effect_diagnostics` and then `ts_code_actions` on the diagnostic range. Treat offered quick fixes/refactors as evidence of the language service's intended rewrite, but still review the resulting behavior.
+
+### Step 7: Report
 Present a safety assessment:
 1. **Definition chain** (what indirection exists)
 2. **Cycle involvement** (any circular dependencies to be aware of)

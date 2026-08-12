@@ -5,7 +5,7 @@ description: Select the right typegraph-mcp tool for TypeScript navigation. Trig
 
 # TypeGraph Tool Selection Guide
 
-Select the right typegraph-mcp tool for the task at hand. These tools provide type-aware TypeScript navigation — use them instead of grep/glob for any TypeScript codebase navigation.
+Select the right typegraph-mcp tool for the task at hand. These tools provide type-aware TypeScript navigation and TSGo LSP feedback — use them before grep/glob for TypeScript symbol, type, reference, call-chain, boundary, hover, diagnostic, or code-action work.
 
 ## When to Activate
 
@@ -13,6 +13,7 @@ Select the right typegraph-mcp tool for the task at hand. These tools provide ty
 - Exploring unfamiliar code or understanding how modules connect
 - Preparing to refactor or modify TypeScript symbols
 - Answering questions about code structure, dependencies, or impact
+- Inspecting editor-style hover, Effect type channels, Effect diagnostics, or quick fixes
 - Any task where you would otherwise use grep/glob to find TypeScript symbols
 
 ## Tool Selection Decision Tree
@@ -32,7 +33,18 @@ Three optional parameters, each covering a different blind spot:
 - **`maxResults`** (default 10) trims the returned **list** only, best matches first. Every count in the response — `exportHits`, `localHits`, `navbarHits`, `totalHits` — describes the full result set, so a trimmed response is still safe to count from. `listTrimmed: true` tells you the list was shortened; it does **not** mean the counts are approximate. That distinction matters: `localsTruncated` invalidates a count, `listTrimmed` does not.
 
 ### "What is the type of X?"
-Use **ts_type_info** — returns the same info as hovering in VS Code. Includes documentation.
+Use **ts_type_info** when you want the raw checker type signature and documentation. This is the stable semantic type view, not the richer editor presentation.
+
+Use **ts_hover** when the presentation matters, not just the raw type. It asks the TSGo LSP for editor-style hover. On Effect projects backed by `@effect/tsgo`, this can include expanded `Success`, `Failure`, and `Requirements` blocks that are richer than plain checker `typeToString` output.
+
+Use **ts_layer_hover** for Effect Layer values. It returns the hover plus flags for Layer graph content and Mermaid links when `@effect/tsgo` provides them.
+
+### "What Effect LSP rules fire here?"
+Use **ts_effect_diagnostics**. It runs `@effect/tsgo diagnostics --format json` and returns structured Effect Language Service diagnostics with rule names/codes, severities, file ranges, and a summary.
+
+If it returns `unavailable: true`, the project is using the plain TypeScript TSGo fallback rather than `@effect/tsgo`. That is expected in non-Effect projects; continue with the other semantic TypeGraph tools.
+
+Use **ts_code_actions** after diagnostics or at a selected symbol/range to inspect available LSP quick fixes and refactors. Pass diagnostics from `ts_effect_diagnostics` when you want diagnostic-specific quick fixes; pass `only: ["refactor.rewrite"]` to focus on Effect refactors.
 
 ### "What are all the exports of this file?"
 Use **ts_module_exports** — lists all exported symbols with their resolved types.
@@ -79,12 +91,13 @@ Use **ts_module_boundary** — analyzes incoming/outgoing edges, shared dependen
 
 ## Key Principles
 
-1. **Always prefer ts_* tools over grep/glob** for TypeScript navigation. They resolve through barrel files, re-exports, and project references.
+1. **Always prefer ts_* tools over grep/glob** for TypeScript navigation, type inspection, Effect-aware hover, diagnostics, code actions, call chains, impact, and module boundaries. They resolve through barrel files, re-exports, and project references.
 2. **Start narrow, expand if needed.** Use ts_definition or ts_find_symbol first. Only use ts_navigate_to (project-wide search) when you don't know the file.
 3. **Use composite helpers to avoid round-trip drift.** Impact analysis starts with ts_symbol_overview, then expands to ts_dependents or ts_module_boundary when the blast radius is broad. Refactor safety = ts_trace_chain + ts_import_cycles.
 4. **Graph queries are instant** (~0.1ms). Point queries are fast (sub-millisecond to a few ms on tsgo). Don't hesitate to use them liberally.
 5. **Startup is fast.** The tsgo backend loads a 1500-file project in well under a second — there is no multi-second warmup. Measured: ~53ms to open a project snapshot, ~190ms to build the export index, ~65ms for a cold LSP query.
 6. **For fast architecture reads, start at composition modules, not barrels.** Barrels are useful for API shape, but entrypoints and composition roots tell you how the system is actually wired.
+7. **Use text search only when it is actually the better primitive:** docs/config/non-TypeScript assets, string literals, broad syntactic discovery such as `Promise.all` or `JSON.parse`, or as a fallback when no MCP tool is available.
 
 ## Tool Reference
 
@@ -94,6 +107,10 @@ Use **ts_module_boundary** — analyzes incoming/outgoing edges, shared dependen
 | `ts_definition` | file + symbol (or line+col) | Go-to-definition through any indirection |
 | `ts_references` | file + symbol (or line+col) | All semantic references to a symbol |
 | `ts_type_info` | file + symbol (or line+col) | Type signature and documentation |
+| `ts_hover` | file + symbol (or line+col) | Editor-style LSP hover; Effect channel expansion when available |
+| `ts_layer_hover` | file + symbol (or line+col) | Effect Layer hover and graph/Mermaid-link detection |
+| `ts_effect_diagnostics` | optional file/severity/config | Structured Effect Language Service diagnostics |
+| `ts_code_actions` | file + range/symbol + optional diagnostics | LSP quick fixes and refactors |
 | `ts_navigate_to` | symbol name (+ optional file) | Project-wide symbol search |
 | `ts_trace_chain` | file + symbol + maxHops | Following a call chain to implementation |
 | `ts_blast_radius` | file + symbol | Impact analysis for changes |

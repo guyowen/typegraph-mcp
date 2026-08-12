@@ -228,8 +228,14 @@ check(
 );
 
 console.log("\nagent instruction files");
-check("CLAUDE.md snippet", fs.readFileSync(path.join(tmp, "CLAUDE.md"), "utf-8").includes("TypeScript Navigation"));
-check("AGENTS.md snippet", fs.readFileSync(path.join(tmp, "AGENTS.md"), "utf-8").includes("TypeScript Navigation"));
+const claudeMd = fs.readFileSync(path.join(tmp, "CLAUDE.md"), "utf-8");
+const agentsMd = fs.readFileSync(path.join(tmp, "AGENTS.md"), "utf-8");
+check("CLAUDE.md snippet", claudeMd.includes("TypeScript Navigation"));
+check("AGENTS.md snippet", agentsMd.includes("TypeScript Navigation"));
+check("AGENTS.md prefers TypeGraph before grep", agentsMd.includes("before `rg`/`grep`"));
+check("AGENTS.md mentions LSP hover", agentsMd.includes("`ts_hover`"));
+check("AGENTS.md mentions Effect diagnostics", agentsMd.includes("`ts_effect_diagnostics`"));
+check("AGENTS.md mentions code actions", agentsMd.includes("`ts_code_actions`"));
 
 console.log("\nlegacy sentinel migration");
 const codexPath = path.join(tmp, ".codex/config.toml");

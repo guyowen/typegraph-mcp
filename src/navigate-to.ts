@@ -276,6 +276,11 @@ export class NavigateTo {
     return lsp;
   }
 
+  /** Shared TSGo LSP client for editor-style tools such as hover and code actions. */
+  async lspClient(): Promise<LspClient> {
+    return this.#ensureLsp();
+  }
+
   /**
    * @param includeLocals also search non-exported declarations and class
    * members via the LSP. That half is subject to the 256 cap — check

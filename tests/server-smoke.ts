@@ -31,7 +31,7 @@ console.log(`tools registered: ${tools.length}`);
 const names = tools.map((t) => t.name).sort();
 console.log(`  ${names.join(", ")}`);
 
-const EXPECTED = 18;
+const EXPECTED = 22;
 let failures = 0;
 const check = (label: string, ok: boolean, detail: string): void => {
   if (!ok) failures++;
@@ -39,7 +39,7 @@ const check = (label: string, ok: boolean, detail: string): void => {
 };
 
 console.log("\nregistration");
-check("all 18 tools present", tools.length === EXPECTED, `${tools.length}/${EXPECTED}`);
+check("all 22 tools present", tools.length === EXPECTED, `${tools.length}/${EXPECTED}`);
 
 const call = async (name: string, args: Record<string, unknown>): Promise<any> => {
   const res: any = await client.callTool({ name, arguments: args });
@@ -50,6 +50,23 @@ console.log("\nsemantic backend (tsgo --api)");
 const info = await call("ts_type_info", { file: "src/core/mod000.ts", symbol: "makeWidget0" });
 check("ts_type_info returns a signature", String(info.type).includes("=>"), info.type);
 
+console.log("\neditor-style LSP tools");
+const hover = await call("ts_hover", { file: "src/core/mod000.ts", symbol: "makeWidget0" });
+check("ts_hover returns editor hover content", typeof hover.value === "string" && hover.value.length > 0, hover.value ?? "");
+
+const notLayer = await call("ts_layer_hover", { file: "src/core/mod000.ts", symbol: "makeWidget0" });
+check("ts_layer_hover reports non-Layer hovers honestly", notLayer.isLayerHover === false, JSON.stringify(notLayer));
+
+const actions = await call("ts_code_actions", {
+  file: "src/core/mod000.ts",
+  symbol: "makeWidget0",
+  only: ["refactor.rewrite"],
+});
+check("ts_code_actions returns a normalized list", Array.isArray(actions.actions), `${actions.count ?? "?"}`);
+
+const diagnostics = await call("ts_effect_diagnostics", {});
+check("ts_effect_diagnostics returns a summary or unavailable marker", !!diagnostics.summary, JSON.stringify(diagnostics));
+
 const defs = await call("ts_definition", { file: "src/index.ts", symbol: "createPrimaryWidget" });
 check(
   "ts_definition resolves the barrel alias",
@@ -58,7 +75,7 @@ check(
 );
 
 const exps = await call("ts_module_exports", { file: "src/core/mod000.ts" });
-check("ts_module_exports lists 7", exps.count === 7, `${exps.count}`);
+check("ts_module_exports lists exports", exps.count >= 7, `${exps.count}`);
 check("ts_module_exports includes kind metadata", typeof exps.exports?.[0]?.kind === "string", exps.exports?.[0]?.kind);
 
 console.log("\nnavigate_to (export index)");

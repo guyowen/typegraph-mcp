@@ -18,7 +18,7 @@
  */
 import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 /** Hard-coded in typescript-go internal/ls/symbols.go:558 — `min(len(infos), 256)`. */
 export const RESULT_CAP = 256;
@@ -39,6 +39,139 @@ export interface LspSymbolResult {
   truncated: boolean;
 }
 
+export interface LspPosition {
+  /** 1-based, matching the public MCP tools. */
+  line: number;
+  /** 1-based, matching the public MCP tools. */
+  column: number;
+}
+
+export interface LspRange {
+  start: LspPosition;
+  end: LspPosition;
+}
+
+export interface LspDiagnostic {
+  range: LspRange;
+  severity?: number;
+  code?: string | number;
+  source?: string;
+  message: string;
+  data?: unknown;
+}
+
+export interface LspHover {
+  kind: "markdown" | "plaintext";
+  value: string;
+  range?: LspRange;
+  source: "@effect/tsgo-lsp";
+}
+
+export interface LspTextEdit {
+  range: LspRange;
+  newText: string;
+}
+
+export interface LspWorkspaceEdit {
+  changes?: Record<string, LspTextEdit[]>;
+}
+
+export interface LspCodeAction {
+  title: string;
+  kind?: string;
+  isPreferred?: boolean;
+  diagnostics?: LspDiagnostic[];
+  edit?: LspWorkspaceEdit;
+  command?: unknown;
+}
+
+function toLspPosition(pos: LspPosition): { line: number; character: number } {
+  return { line: pos.line - 1, character: pos.column - 1 };
+}
+
+function fromLspPosition(pos: { line: number; character: number }): LspPosition {
+  return { line: pos.line + 1, column: pos.character + 1 };
+}
+
+function toLspRange(range: LspRange): {
+  start: { line: number; character: number };
+  end: { line: number; character: number };
+} {
+  return { start: toLspPosition(range.start), end: toLspPosition(range.end) };
+}
+
+function fromLspRange(range: {
+  start: { line: number; character: number };
+  end: { line: number; character: number };
+}): LspRange {
+  return { start: fromLspPosition(range.start), end: fromLspPosition(range.end) };
+}
+
+function uriToPath(uri: string): string {
+  return uri.startsWith("file://") ? fileURLToPath(uri) : uri;
+}
+
+function normalizeHoverContents(contents: any): { kind: "markdown" | "plaintext"; value: string } {
+  if (typeof contents === "string") return { kind: "plaintext", value: contents };
+  if (Array.isArray(contents)) {
+    return {
+      kind: "markdown",
+      value: contents
+        .map((part) => (typeof part === "string" ? part : String(part?.value ?? "")))
+        .filter(Boolean)
+        .join("\n\n"),
+    };
+  }
+  if (contents?.kind === "markdown" || contents?.kind === "plaintext") {
+    return { kind: contents.kind, value: String(contents.value ?? "") };
+  }
+  if (contents?.value !== undefined) return { kind: "markdown", value: String(contents.value) };
+  return { kind: "plaintext", value: "" };
+}
+
+function normalizeDiagnostic(diagnostic: any): LspDiagnostic {
+  return {
+    range: fromLspRange(diagnostic.range),
+    ...(diagnostic.severity !== undefined ? { severity: diagnostic.severity } : {}),
+    ...(diagnostic.code !== undefined ? { code: diagnostic.code } : {}),
+    ...(diagnostic.source !== undefined ? { source: diagnostic.source } : {}),
+    message: String(diagnostic.message ?? ""),
+    ...(diagnostic.data !== undefined ? { data: diagnostic.data } : {}),
+  };
+}
+
+function denormalizeDiagnostic(diagnostic: LspDiagnostic): Record<string, unknown> {
+  return {
+    range: toLspRange(diagnostic.range),
+    ...(diagnostic.severity !== undefined ? { severity: diagnostic.severity } : {}),
+    ...(diagnostic.code !== undefined ? { code: diagnostic.code } : {}),
+    ...(diagnostic.source !== undefined ? { source: diagnostic.source } : {}),
+    message: diagnostic.message,
+    ...(diagnostic.data !== undefined ? { data: diagnostic.data } : {}),
+  };
+}
+
+function normalizeWorkspaceEdit(edit: any): LspWorkspaceEdit | undefined {
+  if (!edit) return undefined;
+  const changes: Record<string, LspTextEdit[]> = {};
+  const addChanges = (uri: string, edits: any[]): void => {
+    (changes[uriToPath(uri)] ??= []).push(
+      ...edits.map((textEdit) => ({
+        range: fromLspRange(textEdit.range),
+        newText: String(textEdit.newText ?? ""),
+      })),
+    );
+  };
+  for (const [uri, edits] of Object.entries(edit.changes ?? {}) as Array<[string, any[]]>) {
+    addChanges(uri, edits);
+  }
+  for (const documentChange of edit.documentChanges ?? []) {
+    const uri = documentChange?.textDocument?.uri;
+    if (typeof uri === "string" && Array.isArray(documentChange.edits)) addChanges(uri, documentChange.edits);
+  }
+  return Object.keys(changes).length > 0 ? { changes } : undefined;
+}
+
 export class LspClient {
   #proc: ChildProcess | undefined;
   #buf = Buffer.alloc(0);
@@ -46,6 +179,8 @@ export class LspClient {
   #nextId = 1;
   #openedProject = false;
   #opened = new Set<string>();
+  #versions = new Map<string, number>();
+  #failed = false;
 
   readonly exePath: string;
   readonly rootDir: string;
@@ -56,9 +191,19 @@ export class LspClient {
   }
 
   async start(): Promise<void> {
+    this.#failed = false;
     this.#proc = spawn(this.exePath, ["--lsp", "-stdio"], {
       cwd: this.rootDir,
       stdio: ["pipe", "pipe", "pipe"],
+    });
+    const failAll = (err: Error): void => {
+      this.#failed = true;
+      for (const { reject } of this.#pending.values()) reject(err);
+      this.#pending.clear();
+    };
+    this.#proc.on("error", failAll);
+    this.#proc.on("exit", (code, signal) => {
+      failAll(new Error(`tsgo LSP exited (${signal ?? code ?? "unknown"})`));
     });
     this.#proc.stdout!.on("data", (c: Buffer) => this.#onData(c));
     this.#proc.stderr!.on("data", (c: Buffer) => {
@@ -74,6 +219,27 @@ export class LspClient {
         workspace: {
           symbol: {
             symbolKind: { valueSet: Array.from({ length: 26 }, (_, i) => i + 1) },
+          },
+        },
+        textDocument: {
+          hover: {
+            contentFormat: ["markdown", "plaintext"],
+          },
+          codeAction: {
+            codeActionLiteralSupport: {
+              codeActionKind: {
+                valueSet: [
+                  "quickfix",
+                  "refactor",
+                  "refactor.extract",
+                  "refactor.inline",
+                  "refactor.rewrite",
+                  "source",
+                  "source.organizeImports",
+                  "source.fixAll",
+                ],
+              },
+            },
           },
         },
       },
@@ -130,6 +296,7 @@ export class LspClient {
   }
 
   #request(method: string, params: unknown): Promise<any> {
+    if (this.#failed) return Promise.reject(new Error("tsgo LSP is not running"));
     const id = this.#nextId++;
     return new Promise((resolve, reject) => {
       this.#pending.set(id, { resolve, reject });
@@ -143,16 +310,35 @@ export class LspClient {
 
   /** Force the project tree to load. Without this workspace/symbol returns []. */
   openFile(absPath: string): void {
-    this.#notify("textDocument/didOpen", {
-      textDocument: {
-        uri: pathToFileURL(absPath).href,
-        languageId: "typescript",
-        version: 1,
-        text: fs.readFileSync(absPath, "utf8"),
-      },
-    });
+    this.syncFile(absPath);
     this.#openedProject = true;
-    this.#opened.add(absPath);
+  }
+
+  /** Keep the LSP's open-file text aligned with disk before point queries. */
+  syncFile(absPath: string): void {
+    const uri = pathToFileURL(absPath).href;
+    const text = fs.readFileSync(absPath, "utf8");
+    if (!this.#opened.has(absPath)) {
+      this.#notify("textDocument/didOpen", {
+        textDocument: {
+          uri,
+          languageId: absPath.endsWith(".tsx") ? "typescriptreact" : "typescript",
+          version: 1,
+          text,
+        },
+      });
+      this.#versions.set(absPath, 1);
+      this.#opened.add(absPath);
+      this.#openedProject = true;
+      return;
+    }
+
+    const version = (this.#versions.get(absPath) ?? 1) + 1;
+    this.#versions.set(absPath, version);
+    this.#notify("textDocument/didChange", {
+      textDocument: { uri, version },
+      contentChanges: [{ text }],
+    });
   }
 
   get hasOpenProject(): boolean {
@@ -193,7 +379,7 @@ export class LspClient {
    * the LSP spec permits either and the choice is the server's.
    */
   async documentSymbol(absPath: string): Promise<LspSymbol[]> {
-    if (!this.#opened.has(absPath)) this.openFile(absPath);
+    this.syncFile(absPath);
     const uri = pathToFileURL(absPath).href;
     const res = await this.#request("textDocument/documentSymbol", {
       textDocument: { uri },
@@ -222,10 +408,56 @@ export class LspClient {
     return out;
   }
 
+  async hover(absPath: string, pos: LspPosition): Promise<LspHover | null> {
+    this.syncFile(absPath);
+    const res = await this.#request("textDocument/hover", {
+      textDocument: { uri: pathToFileURL(absPath).href },
+      position: toLspPosition(pos),
+    });
+    if (!res?.contents) return null;
+    return {
+      ...normalizeHoverContents(res.contents),
+      ...(res.range ? { range: fromLspRange(res.range) } : {}),
+      source: "@effect/tsgo-lsp",
+    };
+  }
+
+  async codeActions(args: {
+    absPath: string;
+    range: LspRange;
+    diagnostics?: LspDiagnostic[];
+    only?: string[];
+  }): Promise<LspCodeAction[]> {
+    this.syncFile(args.absPath);
+    const res = await this.#request("textDocument/codeAction", {
+      textDocument: { uri: pathToFileURL(args.absPath).href },
+      range: toLspRange(args.range),
+      context: {
+        diagnostics: (args.diagnostics ?? []).map(denormalizeDiagnostic),
+        ...(args.only ? { only: args.only } : {}),
+      },
+    });
+
+    return (Array.isArray(res) ? res : [])
+      .filter((action) => action?.title)
+      .map((action) => ({
+        title: String(action.title),
+        ...(action.kind ? { kind: String(action.kind) } : {}),
+        ...(action.isPreferred !== undefined ? { isPreferred: Boolean(action.isPreferred) } : {}),
+        ...(Array.isArray(action.diagnostics)
+          ? { diagnostics: action.diagnostics.map(normalizeDiagnostic) }
+          : {}),
+        ...(action.edit ? { edit: normalizeWorkspaceEdit(action.edit) } : {}),
+        ...(action.command ? { command: action.command } : {}),
+      }));
+  }
+
   async stop(): Promise<void> {
     try {
-      await this.#request("shutdown", null);
-      this.#notify("exit", null);
+      if (!this.#failed && this.#proc?.exitCode === null && this.#proc.signalCode === null) {
+        await this.#request("shutdown", null);
+        this.#notify("exit", null);
+      }
     } catch {
       /* shutting down anyway */
     }

@@ -2,12 +2,16 @@
 /**
  * TypeGraph-Go MCP server.
  *
- * 18 tools over two backends:
+ * 22 tools over four query paths:
  *   - 7 point queries  -> SemanticService  -> tsgo --api  (TypeScript 7)
+ *   - 3 LSP tools      -> LspClient        -> @effect/tsgo --lsp (hover/actions)
+ *   - 1 diagnostics    -> @effect/tsgo diagnostics --format json
  *   - 1 navigate_to    -> NavigateTo       -> export index (+ LSP coordinates/locals)
  *   - 6 graph queries  -> oxc module graph (backend-independent)
  *   - 4 agent helpers  -> small composites over the same backends
  */
+import { spawn } from "node:child_process";
+import { createRequire } from "node:module";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
@@ -27,11 +31,13 @@ import { ApiClient } from "./api-client.ts";
 import { SemanticService } from "./semantic.ts";
 import { DEFAULT_MAX_RESULTS, NavigateTo, truncationNotice } from "./navigate-to.ts";
 import { Invalidator } from "./invalidation.ts";
+import type { LspDiagnostic, LspRange } from "./lsp-client.ts";
 
 const config = resolveConfig(path.dirname(new URL(import.meta.url).pathname));
 const projectRoot = config.projectRoot;
 const tsconfig = path.resolve(projectRoot, config.tsconfigPath);
 const projectRootReal = realpath(projectRoot);
+const require = createRequire(import.meta.url);
 
 function packageVersion(): string {
   try {
@@ -79,6 +85,11 @@ async function getNavigate(): Promise<NavigateTo> {
     await getSemantic();
   }
   return navigate;
+}
+
+async function getLspClient() {
+  const nav = await getNavigate();
+  return nav.lspClient();
 }
 
 async function getGraph(): Promise<ModuleGraph> {
@@ -144,19 +155,208 @@ async function resolveOffset(params: {
   symbol?: string | undefined;
   line?: number | undefined;
   column?: number | undefined;
-}): Promise<{ file: string; offset: number } | { error: string }> {
+}): Promise<{ file: string; offset: number; line: number; column: number } | { error: string }> {
   const sem = await getSemantic();
   const file = abs(params.file);
 
   if (params.line !== undefined && params.column !== undefined) {
-    return { file, offset: sem.locToOffset(file, params.line, params.column) };
+    return { file, offset: sem.locToOffset(file, params.line, params.column), line: params.line, column: params.column };
   }
   if (params.symbol) {
     const loc = await sem.findSymbol(file, params.symbol);
     if (!loc) return { error: `Symbol "${params.symbol}" not found in ${params.file}` };
-    return { file, offset: sem.locToOffset(file, loc.line, loc.column) };
+    return { file, offset: sem.locToOffset(file, loc.line, loc.column), line: loc.line, column: loc.column };
   }
   return { error: "Provide either symbol, or both line and column" };
+}
+
+const lspRangeSchema = z.object({
+  start: z.object({
+    line: z.number().int().positive().describe("1-based start line"),
+    column: z.number().int().positive().describe("1-based start column"),
+  }),
+  end: z.object({
+    line: z.number().int().positive().describe("1-based end line"),
+    column: z.number().int().positive().describe("1-based end column"),
+  }),
+});
+
+const diagnosticSchema = z.unknown().describe(
+  "Diagnostic from ts_effect_diagnostics or a standard LSP diagnostic. Flat @effect/tsgo diagnostics are normalized before the LSP request.",
+);
+
+function pointRange(line: number, column: number): LspRange {
+  return { start: { line, column }, end: { line, column } };
+}
+
+function lspSeverity(severity: unknown): number | undefined {
+  if (typeof severity === "number") return severity;
+  switch (String(severity).toLowerCase()) {
+    case "error":
+      return 1;
+    case "warning":
+    case "warn":
+      return 2;
+    case "message":
+    case "information":
+    case "info":
+      return 3;
+    case "hint":
+      return 4;
+    default:
+      return undefined;
+  }
+}
+
+function diagnosticRange(diagnostic: any): LspRange | undefined {
+  if (
+    typeof diagnostic?.range?.start?.line === "number" &&
+    typeof diagnostic?.range?.start?.column === "number" &&
+    typeof diagnostic?.range?.end?.line === "number" &&
+    typeof diagnostic?.range?.end?.column === "number"
+  ) {
+    return diagnostic.range as LspRange;
+  }
+  if (
+    typeof diagnostic?.range?.start?.line === "number" &&
+    typeof diagnostic?.range?.start?.character === "number" &&
+    typeof diagnostic?.range?.end?.line === "number" &&
+    typeof diagnostic?.range?.end?.character === "number"
+  ) {
+    return {
+      start: { line: diagnostic.range.start.line + 1, column: diagnostic.range.start.character + 1 },
+      end: { line: diagnostic.range.end.line + 1, column: diagnostic.range.end.character + 1 },
+    };
+  }
+  if (
+    typeof diagnostic?.line === "number" &&
+    typeof diagnostic?.column === "number" &&
+    typeof diagnostic?.endLine === "number" &&
+    typeof diagnostic?.endColumn === "number"
+  ) {
+    return {
+      start: { line: diagnostic.line, column: diagnostic.column },
+      end: { line: diagnostic.endLine, column: diagnostic.endColumn },
+    };
+  }
+  return undefined;
+}
+
+function normalizeDiagnosticForCodeAction(diagnostic: unknown): LspDiagnostic | undefined {
+  const value = diagnostic as any;
+  const range = diagnosticRange(value);
+  const message = typeof value?.message === "string" ? value.message : undefined;
+  if (!range || !message) return undefined;
+  return {
+    range,
+    ...(lspSeverity(value.severity) ? { severity: lspSeverity(value.severity) } : {}),
+    ...(value.code !== undefined ? { code: value.code } : {}),
+    source: typeof value.source === "string" ? value.source : "effect",
+    message,
+    ...(value.data !== undefined ? { data: value.data } : value.name ? { data: { name: value.name } } : {}),
+  };
+}
+
+function normalizeEffectDiagnostic(diagnostic: any): Record<string, unknown> {
+  const range = diagnosticRange(diagnostic);
+  return {
+    ...diagnostic,
+    ...(range ? { range } : {}),
+    ...(lspSeverity(diagnostic?.severity) ? { lspSeverity: lspSeverity(diagnostic.severity) } : {}),
+    source: diagnostic?.source ?? "effect",
+  };
+}
+
+async function effectDiagnostics(args: {
+  file?: string;
+  severity?: string;
+  lspconfig?: string;
+}): Promise<unknown> {
+  const sem = await getSemantic();
+  const exe = sem.api.exe;
+  if (!exe || exe.source !== "@effect/tsgo") {
+    return {
+      diagnostics: [],
+      summary: { filesChecked: 0, totalFiles: 0, errors: 0, warnings: 0, messages: 0 },
+      unavailable: true,
+      reason:
+        "Effect diagnostics require @effect/tsgo. This project is currently using the plain TypeScript TSGo fallback.",
+      source: "typescript",
+    };
+  }
+
+  let cli: string;
+  try {
+    cli = path.join(path.dirname(require.resolve("@effect/tsgo/package.json")), "dist", "effect-tsgo.cjs");
+  } catch {
+    return {
+      diagnostics: [],
+      summary: { filesChecked: 0, totalFiles: 0, errors: 0, warnings: 0, messages: 0 },
+      unavailable: true,
+      reason: "@effect/tsgo package is not resolvable from typegraph-mcp",
+      source: "@effect/tsgo diagnostics",
+    };
+  }
+  const command = process.execPath;
+  const cliArgs = [
+    cli,
+    "diagnostics",
+    ...(args.file ? ["--file", abs(args.file)] : ["--project", tsconfig]),
+    "--format",
+    "json",
+    ...(args.severity ? ["--severity", args.severity] : []),
+    ...(args.lspconfig ? ["--lspconfig", args.lspconfig] : []),
+  ];
+
+  const result = await new Promise<{ status: number | null; stdout: string; stderr: string; error?: string }>((resolve) => {
+    const child = spawn(command, cliArgs, {
+      cwd: projectRoot,
+      stdio: ["ignore", "pipe", "pipe"],
+      env: process.env,
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => (stdout += chunk));
+    child.stderr.on("data", (chunk) => (stderr += chunk));
+    child.on("error", (err) => resolve({ status: null, stdout, stderr, error: err.message }));
+    child.on("close", (status) => resolve({ status, stdout, stderr }));
+  });
+
+  if (result.error) {
+    return { error: result.error, stderr: result.stderr, command, args: cliArgs };
+  }
+
+  let parsed: any;
+  try {
+    parsed = JSON.parse(result.stdout);
+  } catch {
+    return {
+      error: "Effect diagnostics did not return JSON",
+      status: result.status,
+      stdout: result.stdout.slice(0, 4000),
+      stderr: result.stderr.slice(0, 4000),
+      command,
+      args: cliArgs,
+    };
+  }
+
+  const diagnostics = Array.isArray(parsed.diagnostics)
+    ? parsed.diagnostics.map(normalizeEffectDiagnostic)
+    : [];
+  return {
+    diagnostics,
+    summary: parsed.summary ?? {
+      filesChecked: 0,
+      totalFiles: 0,
+      errors: diagnostics.filter((d: any) => d.severity === "error").length,
+      warnings: diagnostics.filter((d: any) => d.severity === "warning").length,
+      messages: diagnostics.filter((d: any) => d.severity === "message").length,
+    },
+    count: diagnostics.length,
+    exitStatus: result.status,
+    source: "@effect/tsgo diagnostics",
+    ...(result.stderr.trim() ? { stderr: result.stderr.trim() } : {}),
+  };
 }
 
 // ─── Tool 1: ts_find_symbol ──────────────────────────────────────────────────
@@ -215,7 +415,122 @@ mcpServer.tool(
   },
 );
 
-// ─── Tool 5: ts_navigate_to ──────────────────────────────────────────────────
+// ─── Tool 5: ts_hover ────────────────────────────────────────────────────────
+
+mcpServer.tool(
+  "ts_hover",
+  "Editor-style LSP hover at a symbol or coordinate. On Effect projects backed by @effect/tsgo, this includes rich Effect type-parameter blocks and other Effect Language Service hover content.",
+  locationOrSymbol,
+  async (params) => {
+    const loc = await resolveOffset(params);
+    if ("error" in loc) return json(loc);
+    const lsp = await getLspClient();
+    const hover = await lsp.hover(loc.file, { line: loc.line, column: loc.column });
+    return json(
+      hover ?? {
+        kind: null,
+        value: null,
+        source: "@effect/tsgo-lsp",
+        note: "No LSP hover content at this location",
+      },
+    );
+  },
+);
+
+// ─── Tool 6: ts_layer_hover ─────────────────────────────────────────────────
+
+mcpServer.tool(
+  "ts_layer_hover",
+  "Effect Layer-focused hover helper. Returns the TSGo LSP hover plus flags for Layer graph / Mermaid content when @effect/tsgo provides it.",
+  locationOrSymbol,
+  async (params) => {
+    const loc = await resolveOffset(params);
+    if ("error" in loc) return json(loc);
+    const lsp = await getLspClient();
+    const hover = await lsp.hover(loc.file, { line: loc.line, column: loc.column });
+    const value = hover?.value ?? "";
+    const hasLayerType = /\bLayer\.Layer</.test(value);
+    const hasLayerGraph = value.includes("Show full graph") || value.includes("Show outline");
+    const mermaidLinks = [...value.matchAll(/\]\((https:\/\/(?:mermaid\.live|mermaid\.com)\/[^)]+)\)/g)].map(
+      (match) => match[1]!,
+    );
+    return json({
+      hover,
+      isLayerHover: hasLayerType || hasLayerGraph,
+      hasLayerType,
+      hasLayerGraph,
+      mermaidLinks,
+      source: "@effect/tsgo-lsp",
+      ...(!hover ? { note: "No LSP hover content at this location" } : {}),
+      ...(hover && !hasLayerType && !hasLayerGraph
+        ? { note: "Hover content was returned, but it did not look like an Effect Layer hover." }
+        : {}),
+    });
+  },
+);
+
+// ─── Tool 7: ts_effect_diagnostics ──────────────────────────────────────────
+
+mcpServer.tool(
+  "ts_effect_diagnostics",
+  "Run @effect/tsgo's Effect Language Service diagnostics in structured JSON form. Use this for Effect-specific correctness/style rules such as floating effects, missing Effect context, catchReason opportunities, and Schema/Layer diagnostics. On plain TypeScript TSGo projects, returns unavailable:true with a reason.",
+  {
+    file: z.string().optional().describe("Optional file path (relative or absolute). Defaults to the configured tsconfig project."),
+    severity: z
+      .string()
+      .optional()
+      .describe("Optional comma-separated severity filter: error,warning,message"),
+    lspconfig: z
+      .string()
+      .optional()
+      .describe("Optional inline JSON LSP config passed through to @effect/tsgo diagnostics --lspconfig"),
+  },
+  async ({ file, severity, lspconfig }) => json(await effectDiagnostics({ file, severity, lspconfig })),
+);
+
+// ─── Tool 8: ts_code_actions ────────────────────────────────────────────────
+
+mcpServer.tool(
+  "ts_code_actions",
+  "List LSP code actions / quick fixes / refactors at a range. For diagnostic quick fixes, pass diagnostics from ts_effect_diagnostics; refactors can be listed with only a symbol or coordinate.",
+  {
+    ...locationOrSymbol,
+    range: lspRangeSchema.optional().describe("Explicit 1-based range. If omitted, uses the symbol/coordinate as a point range."),
+    diagnostics: z
+      .array(diagnosticSchema)
+      .optional()
+      .describe("Diagnostics to include in the LSP codeAction context, usually copied from ts_effect_diagnostics."),
+    only: z
+      .array(z.string())
+      .optional()
+      .describe("Optional LSP codeAction kind filter, e.g. ['quickfix'] or ['refactor.rewrite']."),
+  },
+  async (params) => {
+    let file: string;
+    let range: LspRange;
+    if (params.range) {
+      file = abs(params.file);
+      range = params.range as LspRange;
+    } else {
+      const loc = await resolveOffset(params);
+      if ("error" in loc) return json(loc);
+      file = loc.file;
+      range = pointRange(loc.line, loc.column);
+    }
+    const lsp = await getLspClient();
+    const actions = await lsp.codeActions({
+      absPath: file,
+      range,
+      diagnostics: params.diagnostics
+        ?.map(normalizeDiagnosticForCodeAction)
+        .filter((diagnostic): diagnostic is LspDiagnostic => diagnostic !== undefined),
+      only: params.only,
+    });
+    return json({ actions, count: actions.length, source: "@effect/tsgo-lsp" });
+  },
+);
+
+// ─── Tool 9: ts_navigate_to ──────────────────────────────────────────────────
 
 mcpServer.tool(
   "ts_navigate_to",
@@ -277,7 +592,7 @@ mcpServer.tool(
   },
 );
 
-// ─── Tool 6: ts_trace_chain ──────────────────────────────────────────────────
+// ─── Tool 10: ts_trace_chain ──────────────────────────────────────────────────
 
 mcpServer.tool(
   "ts_trace_chain",
@@ -292,7 +607,7 @@ mcpServer.tool(
   },
 );
 
-// ─── Tool 7: ts_blast_radius ─────────────────────────────────────────────────
+// ─── Tool 11: ts_blast_radius ─────────────────────────────────────────────────
 
 mcpServer.tool(
   "ts_blast_radius",
@@ -306,7 +621,7 @@ mcpServer.tool(
   },
 );
 
-// ─── Tool 8: ts_module_exports ───────────────────────────────────────────────
+// ─── Tool 12: ts_module_exports ───────────────────────────────────────────────
 
 mcpServer.tool(
   "ts_module_exports",
@@ -319,7 +634,7 @@ mcpServer.tool(
   },
 );
 
-// ─── Tools 9-12: agent helper composites ─────────────────────────────────────
+// ─── Tools 13-16: agent helper composites ─────────────────────────────────────
 
 mcpServer.tool(
   "ts_project_info",
@@ -337,6 +652,8 @@ mcpServer.tool(
       backend: {
         name: "typegraph-mcp",
         semantic: "tsgo --api",
+        lsp: "@effect/tsgo --lsp hover/document/workspace symbols/code actions",
+        diagnostics: "@effect/tsgo diagnostics --format json when the Effect-patched provider is active",
         navigate: "export index + optional tsgo LSP document/workspace symbols",
         graph: "oxc-parser + oxc-resolver",
         exe: sem.api.exe,
@@ -441,7 +758,7 @@ mcpServer.tool(
   },
 );
 
-// ─── Tools 13-18: graph queries (oxc) ────────────────────────────────────────
+// ─── Tools 17-22: graph queries (oxc) ────────────────────────────────────────
 
 mcpServer.tool(
   "ts_dependency_tree",

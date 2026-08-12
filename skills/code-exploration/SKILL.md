@@ -13,6 +13,7 @@ Efficiently explore unfamiliar TypeScript code using navigation tools instead of
 - Exploring a new codebase or unfamiliar module
 - Understanding the architecture or data flow of a feature
 - Tracing a request from API handler to database
+- Understanding Effect channel types, Layer composition, or LSP diagnostics
 
 ## Workflow
 
@@ -38,6 +39,10 @@ Call `ts_symbol_overview` on the entry point symbol when you need the definition
 
 Call `ts_type_info` when you only need the type signature and documentation.
 
+Call `ts_hover` when editor-style presentation would answer the question better than a raw checker type. On Effect projects backed by `@effect/tsgo`, hover can expand `Success`, `Failure`, and `Requirements` channels.
+
+Call `ts_layer_hover` for Effect Layer values. It can expose Layer graph hover content and Mermaid links that are not visible through text search.
+
 ### Step 3: Trace the Implementation
 Call `ts_trace_chain` to follow the definition chain from the entry point to the implementation. Each hop shows the file, line, and a code preview.
 
@@ -49,9 +54,13 @@ For a fast system-level read, `ts_dependency_tree` on the composition module oft
 ### Step 5: Deep Dive Where Needed
 Only now, read specific files at the lines identified by the tools. You have precise coordinates — no need to read entire files.
 
+### Step 6: Check Effect Diagnostics When Relevant
+
+For Effect-specific correctness or idiom questions, call `ts_effect_diagnostics` before proposing a rewrite. If diagnostics point at a range, use `ts_code_actions` to see the quick fixes/refactors the TSGo LSP itself offers.
+
 ## Key Principle
 
-**Never start by reading entire files.** Use navigation tools to find the exact lines that matter, then read only those lines. This saves context tokens and produces more accurate understanding.
+**Never start by reading entire files or grepping TypeScript symbols.** Use TypeGraph MCP to find the exact lines, types, hovers, diagnostics, and graph relationships that matter, then read only those lines. Use text search for docs/config/non-TypeScript assets or broad syntactic discovery.
 
 ## Example
 

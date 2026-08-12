@@ -2,9 +2,9 @@
 
 Type-aware codebase navigation for AI coding agents, on TypeScript 7.
 
-This server drives **tsgo** via `@effect/tsgo` in `--api` mode, with a small LSP supplement for project-wide local-symbol search and document symbols. It is built for codebases that have moved to TypeScript 7 and need semantic TypeScript navigation through MCP.
+This server drives **tsgo** via `@effect/tsgo` in `--api` mode, with an LSP supplement for editor-style hover, Effect diagnostics/code actions, project-wide local-symbol search, and document symbols. It is built for codebases that have moved to TypeScript 7 and need semantic TypeScript navigation through MCP.
 
-Status: **working end to end.** All 18 MCP tools implemented, verified against a real project on `@effect/tsgo` 0.32.1 / `typescript` 7.0.2. 100 assertions pass on bare `node`; the published package runs compiled `dist/` entrypoints, with no `tsx` runtime dependency. `tsc --noEmit` is clean.
+Status: **working end to end.** All 22 MCP tools implemented, verified against a real project on `@effect/tsgo` 0.32.1 / `typescript` 7.0.2. The published package runs compiled `dist/` entrypoints, with no `tsx` runtime dependency. `tsc --noEmit` is clean.
 
 Installed as skills + an MCP entry per agent. Nothing is copied into your project but SKILL.md files — see [Install model](#install-model-skills--mcp-config-nothing-else).
 
@@ -12,8 +12,9 @@ Installed as skills + an MCP entry per agent. Nothing is copied into your projec
 
 TSGo has no `tsserver` entrypoint. It exposes a separate `--api` RPC surface for semantic checker/program operations and an LSP surface for editor-style queries. TypeGraph-Go uses both deliberately:
 
-- `--api` powers definitions, references, hover types, module exports, trace-chain, blast-radius, and the exact export index.
-- LSP powers optional local-symbol search and document symbols, including route-table and handler-map keys that project-wide export indexes do not see.
+- `--api` powers definitions, references, raw checker type info, module exports, trace-chain, blast-radius, and the exact export index.
+- LSP powers editor-style hover, code actions, optional local-symbol search, and document symbols, including route-table and handler-map keys that project-wide export indexes do not see.
+- `@effect/tsgo diagnostics --format json` powers structured Effect Language Service diagnostics.
 
 ## Architecture
 
@@ -23,6 +24,11 @@ MCP client (Claude Code, OpenCode, Codex, …)
         ├── 7 point-query tools  ──► src/api-client.ts
         │                             typescript/unstable/async
         │                             └─► effect-tsgo --api   (JSON-RPC + msgpack)
+        │
+        ├── 4 LSP tools          ──► src/lsp-client.ts   (hover, Layer hover, code actions)
+        │                             └─► effect-tsgo --lsp
+        │
+        ├── diagnostics          ──► @effect/tsgo diagnostics --format json
         │
         ├── ts_navigate_to       ──► src/navigate-to.ts  (export index + LSP coordinates/locals)
         │
@@ -41,6 +47,10 @@ Point and navigation tools:
 - `ts_definition`
 - `ts_references`
 - `ts_type_info`
+- `ts_hover`
+- `ts_layer_hover`
+- `ts_effect_diagnostics`
+- `ts_code_actions`
 - `ts_navigate_to`
 - `ts_trace_chain`
 - `ts_blast_radius`
@@ -95,6 +105,17 @@ The index is the default. The 256 cap (`typescript-go` `internal/ls/symbols.go:5
 Two tsgo LSP behaviours worth knowing, both encoded in `src/lsp-client.ts`:
 - `workspace/symbol` returns `[]` until a project is loaded — you must `didOpen` a file first.
 - The server issues `client/registerCapability` and **blocks** until the client replies.
+
+## TSGo LSP hover, diagnostics, and code actions
+
+The LSP tools are for editor-style semantic feedback, not text search:
+
+- `ts_hover` asks `@effect/tsgo --lsp` for `textDocument/hover`. In Effect projects this can return the richer Effect Language Service presentation, including expanded `Success`, `Failure`, and `Requirements` blocks.
+- `ts_layer_hover` is a focused wrapper over the same hover response. It flags Layer hovers and extracts Mermaid graph links when `@effect/tsgo` includes them.
+- `ts_effect_diagnostics` runs `@effect/tsgo diagnostics --format json` against either the configured project or one file. It returns structured rule names, codes, severities, ranges, messages, and summary counts. On plain TypeScript TSGo projects, it returns `unavailable: true` with a reason instead of pretending Effect diagnostics ran.
+- `ts_code_actions` asks `textDocument/codeAction` for quick fixes and refactors. Diagnostic quick fixes need diagnostics in the request context; refactors can be listed from a selected symbol/range without diagnostics.
+
+Use these before grepping TypeScript when the question is about a symbol's editor hover, Effect channels, Effect diagnostics, available quick fixes, or Layer composition. Use `rg`/`grep` for docs/config/non-TypeScript assets and broad syntactic discovery where no symbol identity is involved.
 
 ## Install model: skills + MCP config, nothing else
 
@@ -183,6 +204,7 @@ npm run typecheck  # tsc --noEmit (TypeScript 7)
 
 # end-to-end against a real project
 node tests/server-smoke.ts <projectRoot>
+node tests/effect-lsp-smoke.ts <effectProjectRoot> [tsconfig]
 node tests/refresh-bench.ts <projectRoot>
 ```
 

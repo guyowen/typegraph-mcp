@@ -23,6 +23,8 @@ Follow the phases below in order. Each phase produces findings.
 
 **Tool usage:** Call typegraph-mcp tools via the MCP tool interface (e.g., `ts_project_info`, `ts_dependency_tree`, `ts_import_cycles`, etc.). Use `Glob` and `Grep` for file discovery steps. Use `Read` sparingly — only when a phase explicitly requires reading source to verify a hypothesis. The point is to learn as much as possible *from the graph* before reading code.
 
+For TypeScript symbols, types, references, call chains, boundaries, hover content, diagnostics, and code actions, prefer TypeGraph MCP over grep/read-first workflows. Use text search for docs, config, non-TypeScript assets, and broad syntactic discovery where no symbol identity is involved.
+
 **Parallelism:** Within each phase, make independent tool calls in parallel. Between phases, respect the sequencing — later phases depend on earlier findings.
 
 **Adaptiveness:** The procedure below uses placeholders like `<entry_point>` and `<service_file>`. Substitute actual files discovered during execution. If a phase yields surprising results, investigate before moving on — add a "Notable Finding" subsection to the report.
@@ -210,6 +212,17 @@ ts_module_exports(file: "<service_file>")
 Look for paired exports: `ServiceLive` + `ServiceTest`, or `Service` + `Service.Test`. Services with test layers are intentionally designed for testability. Services without them may be legacy, trivial, or undertested.
 
 **Checkpoint:** You can now distinguish intentional patterns from accidental ones, and you know which conventions are project-wide vs localized.
+
+### 3d. Effect hover and diagnostics, when applicable
+
+If the project uses Effect, sample representative Effect values and Layers:
+```
+ts_hover(file: "<effect_file>", symbol: "<program_or_service_method>")
+ts_layer_hover(file: "<layer_file>", symbol: "<LayerBinding>")
+ts_effect_diagnostics()
+```
+
+Record whether hover exposes expanded Success/Failure/Requirements channels and whether Layer hover includes graph/Mermaid content. Diagnostics are part of the architecture read: they reveal Effect-specific correctness and idiom pressure that plain TypeScript errors do not.
 
 ---
 

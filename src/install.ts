@@ -32,17 +32,18 @@ const LEGACY_PLUGIN_DIR = "plugins/typegraph-mcp";
 const AGENT_SNIPPET = `
 ${SNIPPET_MARKER}
 
-Where suitable, use the \`ts_*\` MCP tools instead of grep/glob for navigating TypeScript code. They resolve through barrel files, re-exports, and project references and return semantic results instead of string matches.
+Use the \`ts_*\` MCP tools before \`rg\`/\`grep\` for TypeScript navigation and Effect-aware editor feedback. They resolve through barrel files, re-exports, and project references; return semantic results instead of string matches; and expose TSGo LSP hover, diagnostics, and code actions when available.
 
 - Point queries: \`ts_find_symbol\`, \`ts_definition\`, \`ts_references\`, \`ts_type_info\`, \`ts_navigate_to\`, \`ts_trace_chain\`, \`ts_blast_radius\`, \`ts_module_exports\`
+- TSGo LSP tools: \`ts_hover\`, \`ts_layer_hover\`, \`ts_effect_diagnostics\`, \`ts_code_actions\`
 - Graph queries: \`ts_dependency_tree\`, \`ts_dependents\`, \`ts_import_cycles\`, \`ts_shortest_path\`, \`ts_subgraph\`, \`ts_module_boundary\`
 - Agent helpers: \`ts_project_info\`, \`ts_document_symbols\`, \`ts_symbol_overview\`, \`ts_dead_exports\`
 
 \`ts_navigate_to\` searches exported symbols by default and returns exact counts. Pass \`includeLocals\` to also reach non-exported locals and class members — that half is capped at 256 and sets \`localsTruncated\`; never compare counts from a truncated result. Pass \`file\` to also search one file's document symbols, the only way to find object-literal keys such as RPC handler maps. \`maxResults\` (default 10) trims the returned list only — the counts always describe the full result set.
 
-Use \`ts_project_info\` once at the start of a session to confirm the project root, tsconfig, backend, and graph/index sizes. Use \`ts_document_symbols\` for route tables, RPC handler maps, and object-literal keys in a known file. Use \`ts_symbol_overview\` as the first pass for change-risk questions. Use \`ts_dead_exports\` for explicit dead-export audits.
+Use \`ts_project_info\` once at the start of a session to confirm the project root, tsconfig, backend, and graph/index sizes. Use \`ts_document_symbols\` for route tables, RPC handler maps, and object-literal keys in a known file. Use \`ts_symbol_overview\` as the first pass for change-risk questions. Use \`ts_hover\` when editor hover presentation matters; on Effect projects it can include expanded Success/Failure/Requirements blocks. Use \`ts_layer_hover\` for Effect Layer graph hover content. Use \`ts_effect_diagnostics\` for Effect LSP rule feedback and \`ts_code_actions\` for available quick fixes/refactors. If \`ts_effect_diagnostics\` returns \`unavailable: true\`, the current project is using the plain TypeScript TSGo fallback rather than \`@effect/tsgo\`; continue with non-Effect semantic tools. Use \`ts_dead_exports\` for explicit dead-export audits.
 
-Start with the navigation tools before reading entire files. Use \`rg\`/\`grep\` for non-TypeScript assets, docs, config, and broad text discovery.
+Start with TypeGraph MCP before reading entire files or grepping TypeScript. Use \`rg\`/\`grep\` for non-TypeScript assets, docs, config, and broad syntactic discovery when there is no symbol/type/navigation question.
 `.trimStart();
 
 function detectAgents(projectRoot: string): AgentId[] {

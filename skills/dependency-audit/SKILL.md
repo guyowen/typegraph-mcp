@@ -14,6 +14,7 @@ Audit module dependencies to find circular imports, analyze coupling, and unders
 - User asks about coupling between packages or modules
 - Debugging import-related issues (circular deps, missing exports)
 - Evaluating module boundaries for extraction or reorganization
+- Inspecting Effect Layer dependency graphs
 
 ## Workflow
 
@@ -32,7 +33,10 @@ Call `ts_module_boundary` on the package or directory you want to analyze. The i
 ### Step 4: Map Cross-Package Dependencies
 Call `ts_dependents` on key files to see the cross-package dependency picture. The `byPackage` grouping shows which packages depend on what.
 
-### Step 5: Report
+### Step 5: Inspect Effect Layer Graphs When Present
+For Effect Layer values, call `ts_layer_hover` on the Layer binding. When the project uses `@effect/tsgo`, the hover can include Layer provider/requirement details and Mermaid graph links. Prefer this over grepping `Layer.provide` chains when the question is about Layer composition.
+
+### Step 6: Report
 Present findings as:
 1. **Cycles found** (count + file lists)
 2. **Coupling scores** (per module/directory)
