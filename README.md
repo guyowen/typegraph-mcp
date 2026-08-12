@@ -208,6 +208,14 @@ node tests/effect-lsp-smoke.ts <effectProjectRoot> [tsconfig]
 node tests/refresh-bench.ts <projectRoot>
 ```
 
+## Release/versioning
+
+Package versions are bumped in the repo, not by CI. Before pushing a release to
+`main`, update `package.json` and `package-lock.json` with the intended version
+(`npm version patch --no-git-tag-version`, or the equivalent minor/major bump).
+The GitHub Actions publish job validates, builds, publishes exactly the committed
+version, creates the matching `vX.Y.Z` tag, and syncs `dev` to `main`.
+
 Verified on a 1506-file fixture against `@effect/tsgo` 0.32.1 / `typescript` 7.0.2:
 
 ```

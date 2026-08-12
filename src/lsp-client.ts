@@ -205,6 +205,7 @@ export class LspClient {
     this.#proc.on("exit", (code, signal) => {
       failAll(new Error(`tsgo LSP exited (${signal ?? code ?? "unknown"})`));
     });
+    this.#proc.stdin!.on("error", failAll);
     this.#proc.stdout!.on("data", (c: Buffer) => this.#onData(c));
     this.#proc.stderr!.on("data", (c: Buffer) => {
       if (process.env.TYPEGRAPH_LSP_DEBUG) process.stderr.write(`[tsgo-lsp] ${c}`);
@@ -300,7 +301,12 @@ export class LspClient {
     const id = this.#nextId++;
     return new Promise((resolve, reject) => {
       this.#pending.set(id, { resolve, reject });
-      this.#send({ jsonrpc: "2.0", id, method, params });
+      try {
+        this.#send({ jsonrpc: "2.0", id, method, params });
+      } catch (err) {
+        this.#pending.delete(id);
+        reject(err instanceof Error ? err : new Error(String(err)));
+      }
     });
   }
 
