@@ -1,8 +1,47 @@
 # typegraph-mcp
 
-Type-aware codebase navigation for AI coding agents, on TypeScript 7.
+<p align="center">
+  <img src="./assets/hero.jpg" alt="typegraph-mcp — Semantic TypeScript understanding for AI agents" width="800">
+</p>
 
-This server drives **tsgo** via `@effect/tsgo` in `--api` mode, with an LSP supplement for editor-style hover, Effect diagnostics/code actions, project-wide local-symbol search, and document symbols. It is built for codebases that have moved to TypeScript 7 and need semantic TypeScript navigation through MCP.
+Supercharge your AI coding agent with TypeScript 7 semantic understanding.
+
+22 semantic navigation, graph, and TSGo LSP tools delivered via the
+[Model Context Protocol](https://modelcontextprotocol.io/) so any MCP-compatible
+agent can navigate TypeScript like an IDE instead of grepping through files.
+
+- **Instant type resolution** — hover info, generics, inferred types, and documentation without reading files
+- **Instant Effect-aware hover** — expanded `Success`, `Failure`, and `Requirements` blocks when `@effect/tsgo` exposes them
+- **Instant call tracing** — follow a symbol from handler to implementation in one call
+- **Instant impact analysis** — "what breaks if I change this?" across the entire codebase
+- **Instant dependency mapping** — what imports what, direct and transitive, by package
+- **Instant Effect diagnostics** — structured LSP rule output and quick fixes for projects using the Effect TSGo toolchain
+- **Zero false positives** — semantic references, not string matches
+
+## The problem
+
+AI coding agents navigate TypeScript poorly when they only have text search. They
+`grep` for a symbol name and get comments, string literals, tests, aliases, and
+barrel exports mixed together. They read whole files to reconstruct a type that
+the checker already knows. They guess at blast radius from string matches.
+
+Every wrong turn burns context and makes the next edit less reliable.
+
+## The difference
+
+TypeGraph MCP gives agents narrow semantic tools for the questions they actually
+ask while changing code:
+
+| Question | Text search | typegraph-mcp |
+|---|---|---|
+| Where is this symbol defined? | Reads candidate files and guesses | `ts_definition` resolves through imports, re-exports, barrels, and generics |
+| Who uses this? | String matches with false positives | `ts_references` returns semantic references |
+| What does this return? | Reads implementations and inferred callers | `ts_type_info` / `ts_hover` ask the checker and LSP |
+| What breaks if I change it? | Manual call-chain reconstruction | `ts_blast_radius` and `ts_symbol_overview` summarize usage and package impact |
+| What imports this module? | Path-pattern search | `ts_dependents` and `ts_dependency_tree` use the import graph |
+| Are Effect rules firing? | Run a separate command and parse output | `ts_effect_diagnostics` returns structured rule diagnostics |
+
+This server drives **tsgo** via `@effect/tsgo` in `--api` mode, with an LSP supplement for editor-style hover, Effect diagnostics/code actions, project-wide local-symbol search, and document symbols. It is built for codebases on TypeScript 7, while still analyzing TypeScript 5 projects through its bundled TSGo compatibility path.
 
 Status: **working end to end.** All 22 MCP tools implemented, verified against a real project on `@effect/tsgo` 0.32.1 / `typescript` 7.0.2. The published package runs compiled `dist/` entrypoints, with no `tsx` runtime dependency. `tsc --noEmit` is clean.
 

@@ -1,6 +1,6 @@
 {
   "name": "typegraph-mcp",
-  "version": "0.9.53",
+  "version": "0.9.54",
   "description": "Type-aware codebase navigation for AI coding agents — MCP tools powered by tsgo (TypeScript 7) via @effect/tsgo --api + oxc",
   "license": "MIT",
   "type": "module",
@@ -21,6 +21,7 @@
   "//bin": "Three names, no flag. The -server name IS the stdio server, so an MCP entry never has to name a subcommand or a path inside the package. The package-name bin is the installer for humans and serves MCP when stdio is piped. `typegraph` is the predecessor compatibility alias. The .cjs trampolines validate Node before importing the compiled implementation.",
   "files": [
     "dist/",
+    "assets/",
     "*.json",
     "README.md",
     "LICENSE",
