@@ -85,6 +85,29 @@ fs.writeFileSync(
   ].join("\n"),
 );
 
+// The PROJECT Codex config gets the same hand-rolled table, and this is the one
+// that bit: no sentinels to find, so setup appended a second
+// [mcp_servers.typegraph] and TOML's duplicate-key rule stopped Codex from
+// parsing its config at all. The `other` table below must survive the rewrite,
+// and the tools subtable must not be orphaned.
+fs.mkdirSync(path.join(tmp, ".codex"), { recursive: true });
+fs.writeFileSync(
+  path.join(tmp, ".codex/config.toml"),
+  [
+    "[mcp_servers.typegraph]",
+    `command = "tsx"`,
+    `args = ["plugins/typegraph-mcp/server.ts"]`,
+    "",
+    "[mcp_servers.typegraph.tools.ts_find_symbol]",
+    `approval_mode = "auto"`,
+    "",
+    "[mcp_servers.other]",
+    `command = "python3"`,
+    `args = ["other.py"]`,
+    "",
+  ].join("\n"),
+);
+
 const run = (...args: string[]): string =>
   execFileSync(process.execPath, [path.join(repoRoot, "src/cli.cjs"), ...args], {
     cwd: tmp,
@@ -182,6 +205,19 @@ check(
 
 const toml = fs.readFileSync(path.join(tmp, ".codex/config.toml"), "utf-8");
 check("codex toml block written", toml.includes("[mcp_servers.typegraph]"));
+const tableCount = (s: string, header: string): number => s.split(`\n${header}`).length - 1;
+check(
+  "hand-rolled table adopted, not duplicated (TOML duplicate key)",
+  tableCount(`\n${toml}`, "[mcp_servers.typegraph]") === 1,
+  `${tableCount(`\n${toml}`, "[mcp_servers.typegraph]")} occurrences`,
+);
+check("adopted table is now sentinel-wrapped", toml.includes("# >>> typegraph-mcp >>>"));
+check("stale legacy server path gone", !toml.includes("plugins/typegraph-mcp/server.ts"));
+check("unrelated project Codex entry preserved", toml.includes("[mcp_servers.other]"));
+check(
+  "typegraph subtable preserved",
+  toml.includes("[mcp_servers.typegraph.tools.ts_find_symbol]"),
+);
 
 console.log("\nagent instruction files");
 check("CLAUDE.md snippet", fs.readFileSync(path.join(tmp, "CLAUDE.md"), "utf-8").includes("TypeScript Navigation"));

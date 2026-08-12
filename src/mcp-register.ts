@@ -99,6 +99,53 @@ function findCodexBlock(content: string): { begin: number; end: number; endMarke
   return undefined;
 }
 
+/** `typegraph`, `"typegraph"`, or `'typegraph'` — TOML allows all three. */
+const KEY_FORMS = String.raw`(?:${SERVER_KEY}|"${SERVER_KEY}"|'${SERVER_KEY}')`;
+const BARE_TABLE_RE = new RegExp(
+  String.raw`^[ \t]*\[[ \t]*mcp_servers[ \t]*\.[ \t]*${KEY_FORMS}[ \t]*\][ \t]*$`,
+  "m",
+);
+const NEXT_HEADER_RE = /^[ \t]*\[/m;
+
+/**
+ * A `[mcp_servers.typegraph]` table this installer didn't write — hand-rolled,
+ * or left by a version that predates the sentinels.
+ *
+ * It carries no markers, so the sentinel scan misses it and we would append a
+ * SECOND table with the same key. That doesn't merely leave a stale entry: TOML
+ * rejects duplicate keys outright, so the agent fails to parse its config at all
+ * and stops launching. Overwrite the bare table in place instead.
+ *
+ * The span stops at the next table header, which preserves any
+ * `[mcp_servers.typegraph.tools.*]` subtables — those are distinct keys, and
+ * TOML permits a super-table to be defined ahead of them.
+ */
+function findBareTypegraphTable(content: string): { begin: number; end: number } | undefined {
+  const header = BARE_TABLE_RE.exec(content);
+  if (!header) return undefined;
+  const bodyStart = header.index + header[0].length;
+  const nextHeader = NEXT_HEADER_RE.exec(content.slice(bodyStart));
+  return {
+    begin: header.index,
+    end: nextHeader ? bodyStart + nextHeader.index : content.length,
+  };
+}
+
+/**
+ * `[mcp_servers]` carrying an inline `typegraph = { ... }` key collides exactly
+ * the same way, but can't be rewritten by span — the enclosing table isn't ours
+ * to replace. Bail loudly rather than emit a file the agent refuses to parse.
+ */
+function hasInlineTypegraphKey(content: string): boolean {
+  const section = /^[ \t]*\[[ \t]*mcp_servers[ \t]*\][ \t]*$/m.exec(content);
+  if (!section) return false;
+  const bodyStart = section.index + section[0].length;
+  const rest = content.slice(bodyStart);
+  const nextHeader = NEXT_HEADER_RE.exec(rest);
+  const body = nextHeader ? rest.slice(0, nextHeader.index) : rest;
+  return new RegExp(String.raw`^[ \t]*${KEY_FORMS}[ \t]*[.=]`, "m").test(body);
+}
+
 function writeCodexToml(projectRoot: string, cmd: McpCommand): RegisterResult {
   const fullPath = path.resolve(projectRoot, ".codex/config.toml");
   const argsToml = cmd.args.map((a) => JSON.stringify(a)).join(", ");
@@ -120,7 +167,19 @@ function writeCodexToml(projectRoot: string, cmd: McpCommand): RegisterResult {
   if (existing) {
     next = content.slice(0, existing.begin) + block + content.slice(existing.end + existing.endMarker.length);
   } else {
-    next = content.trimEnd() + (content.trim() ? "\n\n" : "") + block + "\n";
+    const bare = findBareTypegraphTable(content);
+    if (bare) {
+      const tail = content.slice(bare.end);
+      next = content.slice(0, bare.begin) + block + (tail.trim() ? `\n\n${tail}` : "\n");
+    } else if (hasInlineTypegraphKey(content)) {
+      return {
+        file: fullPath,
+        action: "skipped",
+        reason: `an inline "${SERVER_KEY}" key under [mcp_servers] would become a duplicate TOML key — remove it, then re-run setup`,
+      };
+    } else {
+      next = content.trimEnd() + (content.trim() ? "\n\n" : "") + block + "\n";
+    }
   }
 
   if (next === content) return { file: fullPath, action: "unchanged" };
