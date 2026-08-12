@@ -76,7 +76,7 @@ jobs:
           git add package.json package-lock.json
           git commit -m "v${NEW_VERSION} [skip ci]"
           git tag "v${NEW_VERSION}"
-          git push --follow-tags
+          git push origin main "refs/tags/v${NEW_VERSION}"
 
       - name: Sync dev with main
         run: git push --force origin main:dev
