@@ -19,6 +19,11 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import {
+  forceClose,
+  observeChildClose,
+  resolvesWithin,
+} from "./process-lifecycle.ts";
 
 /** Hard-coded in typescript-go internal/ls/symbols.go:558 — `min(len(infos), 256)`. */
 export const RESULT_CAP = 256;
@@ -200,10 +205,7 @@ export class LspClient {
       stdio: ["pipe", "pipe", "pipe"],
     });
     const proc = this.#proc;
-    this.#closed = new Promise((resolve) => {
-      proc.once("close", () => resolve());
-      proc.once("error", () => resolve());
-    });
+    this.#closed = observeChildClose(proc);
     const failAll = (err: Error): void => {
       this.#failed = true;
       for (const { reject } of this.#pending.values()) reject(err);
@@ -489,28 +491,8 @@ export class LspClient {
     // Windows, where a live child retains a handle on its cwd. A broken server is
     // still bounded: terminate after the grace period and wait once more.
     const closedGracefully = exitNotified && (await resolvesWithin(closed, 1_000));
-    if (!closedGracefully) {
-      if (proc.exitCode === null && proc.signalCode === null) proc.kill("SIGKILL");
-      await resolvesWithin(closed, 1_000);
-    }
+    if (!closedGracefully) await forceClose(proc, closed);
     this.#proc = undefined;
     this.#closed = undefined;
-  }
-}
-
-async function resolvesWithin(promise: Promise<unknown>, timeoutMs: number): Promise<boolean> {
-  let timer: NodeJS.Timeout | undefined;
-  try {
-    return await Promise.race([
-      promise.then(
-        () => true,
-        () => false,
-      ),
-      new Promise<false>((resolve) => {
-        timer = setTimeout(() => resolve(false), timeoutMs);
-      }),
-    ]);
-  } finally {
-    if (timer) clearTimeout(timer);
   }
 }

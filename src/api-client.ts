@@ -12,6 +12,7 @@
  * to typescript's bundled binary when @effect/tsgo isn't installed.
  */
 import { createRequire } from "node:module";
+import type { ChildProcess } from "node:child_process";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { API } from "typescript/unstable/async";
@@ -20,6 +21,7 @@ import {
   type CanonicalizePath,
   type PathApi,
 } from "./path-containment.ts";
+import { forceCloseAfter, observeChildClose } from "./process-lifecycle.ts";
 import { assertVersionsAgree, type VersionInfo } from "./version-guard.ts";
 
 const require = createRequire(import.meta.url);
@@ -246,9 +248,31 @@ export class ApiClient {
   }
 
   async close(): Promise<void> {
-    await this.#api?.close();
-    this.#api = undefined;
-    this.#project = undefined;
-    this.#snapshot = undefined;
+    const api = this.#api;
+    // TypeScript 7's async API ends the spawned tsgo process's stdin but does
+    // not await its close event. Capture that internal child before close()
+    // clears the reference so callers can safely remove a Windows project cwd.
+    const candidate = (api as any)?.client?.process as unknown;
+    const proc = isChildProcess(candidate) ? candidate : undefined;
+    const lifecycleMismatch = api !== undefined && proc === undefined;
+    const closed = proc ? observeChildClose(proc) : undefined;
+    try {
+      await api?.close();
+      if (lifecycleMismatch) {
+        throw new Error(
+          "TypeScript async API exposed no spawned compiler process; cannot verify clean shutdown",
+        );
+      }
+    } finally {
+      if (proc && closed) await forceCloseAfter(proc, closed);
+      this.#api = undefined;
+      this.#project = undefined;
+      this.#snapshot = undefined;
+    }
   }
+}
+
+function isChildProcess(value: unknown): value is ChildProcess {
+  const candidate = value as Partial<ChildProcess> | undefined;
+  return typeof candidate?.once === "function" && typeof candidate.kill === "function";
 }
