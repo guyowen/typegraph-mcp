@@ -131,7 +131,9 @@ try {
   await nav.close();
   await api.close();
   process.chdir(repoRoot);
-  fs.rmSync(tmp, { recursive: true, force: true });
+  // Windows can retain the compiler's directory handle for a few milliseconds
+  // after the awaited shutdown. Retry only transient recursive-removal errors.
+  fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 }
 
 console.log(failures === 0 ? "\nOK — file and maxResults behave" : `\n${failures} FAILURES`);

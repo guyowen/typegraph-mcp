@@ -95,6 +95,31 @@ export interface ApiClientOptions {
 }
 
 /**
+ * Whether a compiler-reported file belongs to the project's source surface.
+ *
+ * TSGo may report Windows paths with forward slashes while Node resolves the
+ * project root with backslashes. A raw string-prefix check therefore rejects
+ * every source file on Windows. `path.relative` applies the host platform's
+ * separator and case rules before we test containment.
+ */
+export function isProjectSourceFile(
+  projectRoot: string,
+  fileName: string,
+  pathApi: Pick<typeof path, "relative" | "isAbsolute" | "sep"> = path,
+): boolean {
+  const relative = pathApi.relative(projectRoot, fileName);
+  if (
+    relative === ".." ||
+    relative.startsWith(`..${pathApi.sep}`) ||
+    pathApi.isAbsolute(relative)
+  ) {
+    return false;
+  }
+  const segments = relative.split(pathApi.sep);
+  return !segments.includes("node_modules") && !fileName.toLowerCase().endsWith(".d.ts");
+}
+
+/**
  * A live tsgo API session bound to one tsconfig project.
  *
  * NOTE ON LIFETIME: a snapshot is immutable. Any file edit requires a new
@@ -203,12 +228,7 @@ export class ApiClient {
   /** Project source files, excluding lib.d.ts and node_modules. */
   async projectFiles(): Promise<string[]> {
     const all: readonly string[] = await this.program.getSourceFileNames();
-    return all.filter(
-      (f) =>
-        f.startsWith(this.options.projectRoot) &&
-        !f.includes("node_modules") &&
-        !f.endsWith(".d.ts"),
-    );
+    return all.filter((fileName) => isProjectSourceFile(this.options.projectRoot, fileName));
   }
 
   /**
