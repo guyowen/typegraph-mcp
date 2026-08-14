@@ -43,17 +43,10 @@ export type McpEntryShape =
   /** { type: "local", command: [cmd, ...args], enabled } — OpenCode */
   | "opencode";
 
-/**
- * Project-scoped configs live in the repo and are usually committed, so they
- * get a project-relative server path. Global ones are outside any project and
- * must carry absolutes.
- */
-export type McpScope = "project" | "global";
-
 export type McpRegistration =
   | { kind: "none" }
-  | { kind: "json"; scope: McpScope; file: string; rootKey: string; shape: McpEntryShape }
-  | { kind: "codex-toml"; scope: McpScope };
+  | { kind: "json"; file: string; rootKey: string; shape: McpEntryShape }
+  | { kind: "codex-toml" };
 
 export interface AgentDef {
   name: string;
@@ -89,7 +82,6 @@ export const AGENTS: Record<AgentId, AgentDef> = {
     skillsReadsFrom: ["claude"],
     mcp: {
       kind: "json",
-      scope: "project",
       file: ".mcp.json",
       rootKey: "mcpServers",
       shape: "command-args",
@@ -105,7 +97,6 @@ export const AGENTS: Record<AgentId, AgentDef> = {
     skillsReadsFrom: ["cursor", "claude", "agents"],
     mcp: {
       kind: "json",
-      scope: "project",
       file: ".cursor/mcp.json",
       rootKey: "mcpServers",
       shape: "command-args",
@@ -116,7 +107,7 @@ export const AGENTS: Record<AgentId, AgentDef> = {
     name: "Codex CLI",
     agentFile: "AGENTS.md",
     skillsReadsFrom: ["agents"],
-    mcp: { kind: "codex-toml", scope: "project" },
+    mcp: { kind: "codex-toml" },
     detect: (root) => exists(root, "AGENTS.md", ".codex"),
   },
   gemini: {
@@ -132,7 +123,6 @@ export const AGENTS: Record<AgentId, AgentDef> = {
     skillsReadsFrom: ["agents"],
     mcp: {
       kind: "json",
-      scope: "project",
       file: ".vscode/mcp.json",
       rootKey: "servers",
       shape: "command-args-stdio",
@@ -145,7 +135,6 @@ export const AGENTS: Record<AgentId, AgentDef> = {
     skillsReadsFrom: ["agents"],
     mcp: {
       kind: "json",
-      scope: "project",
       file: ".agents/mcp_config.json",
       rootKey: "mcpServers",
       shape: "command-args",
@@ -162,7 +151,6 @@ export const AGENTS: Record<AgentId, AgentDef> = {
     skillsReadsFrom: ["claude", "agents"],
     mcp: {
       kind: "json",
-      scope: "project",
       file: "opencode.json",
       rootKey: "mcp",
       shape: "opencode",
@@ -214,7 +202,7 @@ export function projectJsonMcpConfigs(): Array<{ file: string; rootKey: string }
   const seen = new Map<string, { file: string; rootKey: string }>();
   for (const id of AGENT_IDS) {
     const reg = AGENTS[id].mcp;
-    if (reg.kind === "json" && reg.scope === "project") {
+    if (reg.kind === "json") {
       seen.set(reg.file, { file: reg.file, rootKey: reg.rootKey });
     }
   }

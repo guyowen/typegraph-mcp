@@ -35,11 +35,18 @@ const USAGE = `typegraph-mcp — type-aware TypeScript navigation for AI agents
 
 function optionValue(args: readonly string[], name: string): string | undefined {
   const index = args.indexOf(name);
+  const inline = args.find((arg) => arg.startsWith(`${name}=`));
+  if (index !== -1 && inline !== undefined) {
+    throw new Error(`${name} may only be provided once`);
+  }
+  if (inline !== undefined) {
+    const value = inline.slice(name.length + 1);
+    if (value === "") throw new Error(`${name} requires a value`);
+    return value;
+  }
   if (index === -1) return undefined;
   const value = args[index + 1];
-  if (value === undefined || value.startsWith("--")) {
-    throw new Error(`${name} requires a value`);
-  }
+  if (value === undefined || value.startsWith("--")) throw new Error(`${name} requires a value`);
   return value;
 }
 
@@ -95,6 +102,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  console.error(err);
+  console.error(err instanceof Error ? err.message : String(err));
   process.exit(1);
 });

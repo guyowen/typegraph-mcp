@@ -17,9 +17,10 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 
 const repoRoot = path.resolve(import.meta.dirname, "..");
+const cli = path.join(repoRoot, "src/cli.cjs");
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tg-cli-"));
 
 // ─── seed a project ──────────────────────────────────────────────────────────
@@ -43,9 +44,8 @@ fs.writeFileSync(
 `,
 );
 
-// HOME is redirected because Antigravity's MCP config is global, and `remove`
-// deregisters it unconditionally — an uninstall run must not reach into the
-// developer's real ~/.gemini while the suite is running.
+// HOME is redirected because upgrade cleanup removes stale global config from
+// older releases; the suite must not reach the developer's real files.
 const fakeHome = path.join(tmp, "home");
 fs.mkdirSync(fakeHome, { recursive: true });
 
@@ -112,7 +112,7 @@ fs.writeFileSync(
 );
 
 const run = (...args: string[]): string =>
-  execFileSync(process.execPath, [path.join(repoRoot, "src/cli.cjs"), ...args], {
+  execFileSync(process.execPath, [cli, ...args], {
     cwd: tmp,
     env: { ...process.env, HOME: fakeHome, TYPEGRAPH_PROJECT_ROOT: tmp },
     encoding: "utf-8",
@@ -269,7 +269,7 @@ const mcpDep = readJson(".mcp.json");
 const mcpDepServer = mcpDep.mcpServers?.["typegraph-mcp"];
 check(
   "server path is now project-relative",
-  mcpDepServer?.args?.[0] === path.join("node_modules", "typegraph-mcp", "dist", "server.cjs"),
+  mcpDepServer?.args?.[0] === "node_modules/typegraph-mcp/dist/server.cjs",
   mcpDepServer?.args?.[0],
 );
 check(
@@ -283,13 +283,13 @@ check(
 const ocDep = readJson("opencode.jsonc");
 check(
   "opencode picks up the relative path too",
-  ocDep.mcp?.["typegraph-mcp"]?.command?.[1] === path.join("node_modules", "typegraph-mcp", "dist", "server.cjs"),
+  ocDep.mcp?.["typegraph-mcp"]?.command?.[1] === "node_modules/typegraph-mcp/dist/server.cjs",
   ocDep.mcp?.["typegraph-mcp"]?.command?.[1],
 );
 const skillAfter = fs.readFileSync(path.join(tmp, ".claude/skills/deep-survey/SKILL.md"), "utf-8");
 check(
   "skills re-templated to a relocation-safe installed copy",
-  skillAfter.includes('"node" "./node_modules/typegraph-mcp/dist/cli.cjs" check') &&
+  skillAfter.includes('node "./node_modules/typegraph-mcp/dist/cli.cjs" check') &&
     !skillAfter.includes(tmp),
 );
 check(
@@ -297,6 +297,55 @@ check(
   skillAfter.includes('--project-root "."') && skillAfter.includes('--tsconfig "./tsconfig.json"'),
 );
 check("project MCP config uses portable node from PATH", mcpDepServer?.command === "node");
+
+console.log("\nabsolute in-project tsconfig is normalized before it reaches committed files");
+run("setup", "--yes", "--tsconfig", path.join(tmp, "tsconfig.json"));
+const normalizedMcp = readJson(".mcp.json").mcpServers?.["typegraph-mcp"];
+const normalizedSkill = fs.readFileSync(
+  path.join(tmp, ".claude/skills/deep-survey/SKILL.md"),
+  "utf-8",
+);
+check(
+  "MCP config stores a project-relative tsconfig",
+  normalizedMcp?.env?.TYPEGRAPH_TSCONFIG === "./tsconfig.json",
+  normalizedMcp?.env?.TYPEGRAPH_TSCONFIG,
+);
+check(
+  "skill stores a project-relative tsconfig",
+  normalizedSkill.includes('--tsconfig "./tsconfig.json"') && !normalizedSkill.includes(tmp),
+);
+
+console.log("\nout-of-project tsconfig is rejected before setup writes");
+const outsideTsconfig = path.join(path.dirname(tmp), `${path.basename(tmp)}-outside.json`);
+fs.writeFileSync(outsideTsconfig, "{}\n");
+const configBeforeReject = fs.readFileSync(path.join(tmp, ".mcp.json"), "utf-8");
+const skillBeforeReject = normalizedSkill;
+const rejected = spawnSync(
+  process.execPath,
+  [cli, "setup", "--yes", "--project-root", tmp, "--tsconfig", outsideTsconfig],
+  {
+    cwd: tmp,
+    env: { ...process.env, HOME: fakeHome },
+    encoding: "utf-8",
+  },
+);
+const rejectedOutput = `${rejected.stdout}${rejected.stderr}`;
+check("outside tsconfig exits non-zero", rejected.status === 1, rejectedOutput);
+check(
+  "outside tsconfig error is explicit and concise",
+  rejectedOutput.includes("must be inside the project root") && !rejectedOutput.includes("\n    at "),
+  rejectedOutput,
+);
+check(
+  "rejected setup leaves MCP config untouched",
+  fs.readFileSync(path.join(tmp, ".mcp.json"), "utf-8") === configBeforeReject,
+);
+check(
+  "rejected setup leaves skills untouched",
+  fs.readFileSync(path.join(tmp, ".claude/skills/deep-survey/SKILL.md"), "utf-8") ===
+    skillBeforeReject,
+);
+fs.rmSync(outsideTsconfig, { force: true });
 
 console.log("\nremove");
 run("remove");

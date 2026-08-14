@@ -25,7 +25,7 @@ function makeProject(
       fs.symlinkSync(
         path.join(repoRoot, "node_modules", "typescript"),
         path.join(projectRoot, "node_modules", "typescript"),
-        "dir",
+        process.platform === "win32" ? "junction" : "dir",
       );
     } else {
       const tsRoot = path.join(projectRoot, "node_modules", "typescript");
@@ -88,6 +88,21 @@ function runCheckWithCliOptions(
   return { status: result.status, output: `${result.stdout}${result.stderr}` };
 }
 
+function runCheckWithCliEqualsOptions(
+  projectRoot: string,
+  cwd: string,
+): { status: number | null; output: string } {
+  const env = { ...process.env };
+  delete env["TYPEGRAPH_PROJECT_ROOT"];
+  delete env["TYPEGRAPH_TSCONFIG"];
+  const result = spawnSync(
+    process.execPath,
+    [cli, "check", `--project-root=${projectRoot}`, "--tsconfig=./tsconfig.json"],
+    { cwd, env, encoding: "utf-8" },
+  );
+  return { status: result.status, output: `${result.stdout}${result.stderr}` };
+}
+
 try {
   console.log("project environment checks");
 
@@ -112,6 +127,15 @@ try {
     "CLI options target the requested project",
     explicitCli.output.includes(`project: ${goodProject}`) && explicitCli.output.includes("tsconfig.json exists"),
     explicitCli.output,
+  );
+
+  const explicitEqualsCli = runCheckWithCliEqualsOptions(goodProject, tempRoot);
+  check(
+    "CLI --flag=value options target the requested project",
+    explicitEqualsCli.status === 0 &&
+      explicitEqualsCli.output.includes(`project: ${goodProject}`) &&
+      explicitEqualsCli.output.includes("tsconfig.json exists"),
+    explicitEqualsCli.output,
   );
 
   const ts5Project = makeProject("ts5", { tsconfig: true, typescript: "ts5-stub" });

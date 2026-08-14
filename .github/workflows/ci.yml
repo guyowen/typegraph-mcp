@@ -8,7 +8,10 @@ on:
 
 jobs:
   validate:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v6
 
@@ -36,7 +39,7 @@ jobs:
           node dist/cli.cjs check
 
       - name: Verify compiled modules parse
-        run: find dist -maxdepth 1 \( -name '*.js' -o -name '*.cjs' \) -exec node --check {} \;
+        run: node scripts/check-dist-syntax.mjs
 
       - name: Verify npm package contents
         run: npm pack --dry-run

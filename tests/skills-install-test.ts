@@ -1,7 +1,7 @@
 /**
  * Verifies the two inherited installer bugs are actually fixed:
  *  - no ${CLAUDE_PLUGIN_ROOT} or __TYPEGRAPH_* placeholder survives to disk
- *  - the interpreter written is not a version-pinned nvm or fnm path
+ *  - the generated health command remains executable after the project moves
  *
  * The placeholder half matters more now than it did under the plugin layout:
  * skills are installed into directories the agent owns, and the package they
@@ -12,6 +12,7 @@ import assert from "node:assert";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { execSync } from "node:child_process";
 import {
   CHECK_PLACEHOLDER,
   CLI_PLACEHOLDER,
@@ -23,7 +24,6 @@ import {
   SKILL_NAMES,
   TSCONFIG_PLACEHOLDER,
 } from "../src/install-skills.ts";
-import { resolveInterpreter } from "../src/install-paths.ts";
 import type { SkillsDir } from "../src/agents.ts";
 
 const sourceDir = path.resolve(import.meta.dirname, "..");
@@ -32,7 +32,10 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tg-skills-"));
 // is not the same directory the skills are written to.
 const packageRoot = path.join(tmp, "node_modules", "typegraph-mcp");
 fs.mkdirSync(path.join(packageRoot, "dist"), { recursive: true });
-fs.writeFileSync(path.join(packageRoot, "dist/cli.cjs"), "// stand-in\n");
+fs.writeFileSync(
+  path.join(packageRoot, "dist/cli.cjs"),
+  'require("node:fs").writeFileSync("health-check.json", JSON.stringify({ cwd: process.cwd(), argv: process.argv.slice(2) }));\n',
+);
 
 const res = installSkills({
   sourceDir,
@@ -79,9 +82,10 @@ console.log(`\ndeep-survey prerequisite as installed for Codex:\n  ${prereq}`);
 
 assert.ok(prereq, "prerequisite command line should exist");
 assert.ok(
-  prereq.includes('"node" "./node_modules/typegraph-mcp/dist/cli.cjs" check'),
+  prereq.includes('node "./node_modules/typegraph-mcp/dist/cli.cjs" check'),
   "project dependency health check must use the portable public CLI",
 );
+assert.ok(!prereq.startsWith('"node"'), "PowerShell requires a bare command name unless `&` is used");
 assert.ok(!prereq.includes(tmp), "project dependency check must survive relocating the project");
 assert.ok(
   prereq.includes('--project-root "."'),
@@ -92,22 +96,25 @@ assert.ok(
   "health check must use the configured tsconfig",
 );
 
-const interp = resolveInterpreter();
-console.log(`\ninterpreter: ${interp.command} (stable=${interp.stable})`);
-assert.ok(
-  !/\/\.nvm\/versions\/node\/v[^/]+\/bin\/node$/.test(interp.command),
-  `interpreter must not be a version-pinned nvm path: ${interp.command}`,
-);
-assert.ok(
-  !/\/fnm\/node-versions\/v[^/]+\/installation\/bin\/node$/.test(interp.command),
-  `interpreter must not be a version-pinned fnm path: ${interp.command}`,
-);
+const moved = `${tmp} moved`;
+fs.renameSync(tmp, moved);
+execSync(prereq, { cwd: moved, stdio: "pipe" });
+const health = JSON.parse(fs.readFileSync(path.join(moved, "health-check.json"), "utf-8"));
+assert.equal(fs.realpathSync(health.cwd), fs.realpathSync(moved));
+assert.deepEqual(health.argv, [
+  "check",
+  "--project-root",
+  ".",
+  "--tsconfig",
+  "./tsconfig.typegraph.json",
+]);
+console.log("  ok  generated command executes after relocating the project");
 
-fs.rmSync(tmp, { recursive: true, force: true });
+fs.rmSync(moved, { recursive: true, force: true });
 
 if (leaks.length > 0) {
   console.error(`\nFAIL: ${leaks.length} unexpanded placeholders`);
   for (const l of leaks) console.error(`  ${l}`);
   process.exit(1);
 }
-console.log("\nOK: no unexpanded placeholders, interpreter is upgrade-safe");
+console.log("\nOK: no unexpanded placeholders, relocated health command works");

@@ -3,11 +3,11 @@
  * typegraph-mcp check — health check.
  *
  * Exists largely because the interesting failure modes are SILENT: a
- * version-skewed API client (msgpack decode errors deep in a request), a baked
- * interpreter path pointing at an uninstalled Node version, and — since the
- * plugin directory went away — a server path pointing at a package that was
- * moved, uninstalled, or garbage-collected out of the npx cache. In all three
- * cases the MCP server simply never produces results, so each is checked here.
+ * version-skewed API client (msgpack decode errors deep in a request), a PATH
+ * Node that is missing or too old, and — since the plugin directory went away
+ * — a server path pointing at a package that was moved, uninstalled, or
+ * garbage-collected out of the npx cache. In all three cases the MCP server
+ * simply never produces results, so each is checked here.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -19,7 +19,6 @@ import { buildGraph } from "./module-graph.ts";
 import {
   MIN_NODE_VERSION,
   nodeVersion,
-  resolveInterpreter,
   supportsNativeTypeScript,
 } from "./install-paths.ts";
 import { SERVER_KEY } from "./mcp-register.ts";
@@ -89,6 +88,8 @@ function collectInstalled(projectRoot: string): InstalledEntry[] {
     }
   }
 
+  // Retired releases wrote Antigravity globally. Keep surfacing a stale entry
+  // until setup/remove has had a chance to clean it.
   const antigravity = path.join(process.env["HOME"] ?? "", ".gemini/antigravity/mcp_config.json");
   fromJsonConfig(antigravity, path.dirname(antigravity), "mcpServers", entries);
 
@@ -190,13 +191,7 @@ async function main(): Promise<void> {
     );
   }
 
-  // 3. Interpreter policy, then what is actually on disk
-  const interp = resolveInterpreter();
-  add(
-    interp.stable ? "ok" : "warn",
-    "interpreter policy",
-    `${interp.command}${interp.note ? `\n    ${interp.note}` : ""}`,
-  );
+  // 3. What is actually on disk
   checkInstalled(projectRoot);
 
   // 4. Target project shape

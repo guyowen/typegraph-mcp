@@ -7,12 +7,9 @@
  * old `rootKey === "servers"` special-case doesn't generalize. buildMcpEntry()
  * in agents.ts owns the shapes; this module owns the file I/O.
  *
- * Scope is the other axis. Project-scoped configs (.mcp.json, .cursor/mcp.json,
- * opencode.json, .codex/config.toml) live in the repo and normally get
- * committed, so they receive a project-relative server path and `node` from
- * PATH — installer-machine absolute paths would resolve only for that user.
- * Antigravity's config is in $HOME and cannot use a relative path for either
- * the server or the project root, so it gets absolutes for both.
+ * Every supported config is project-scoped and normally committed, so it
+ * receives a project-relative server path and `node` from PATH — installer-
+ * machine absolute paths would resolve only for that user.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -22,7 +19,6 @@ import {
   buildMcpEntry,
   type AgentId,
   type McpCommand,
-  type McpScope,
 } from "./agents.ts";
 import { serverArgFor, type ServerTarget } from "./install-paths.ts";
 import { readConfig } from "./jsonc.ts";
@@ -218,28 +214,17 @@ function writeCodexToml(projectRoot: string, cmd: McpCommand): RegisterResult {
 
 
 export interface RegisterOptions {
-  interpreter: string;
   target: ServerTarget;
   tsconfig?: string;
 }
 
-/**
- * The server invocation for a config of the given scope.
- *
- * TYPEGRAPH_PROJECT_ROOT is "." for project-scoped configs — the agent launches
- * the server with the project as cwd — and absolute for global ones, where cwd
- * is whatever workspace the user happens to have open.
- */
-function commandFor(
-  projectRoot: string,
-  scope: McpScope,
-  options: RegisterOptions,
-): McpCommand {
+/** All generated configs launch from their project root. */
+function commandFor(options: RegisterOptions): McpCommand {
   return {
-    command: scope === "project" ? "node" : options.interpreter,
-    args: [serverArgFor(options.target, scope)],
+    command: "node",
+    args: [serverArgFor(options.target)],
     env: {
-      TYPEGRAPH_PROJECT_ROOT: scope === "project" ? "." : projectRoot,
+      TYPEGRAPH_PROJECT_ROOT: ".",
       TYPEGRAPH_TSCONFIG: options.tsconfig ?? "./tsconfig.json",
     },
   };
@@ -257,7 +242,7 @@ export function registerMcp(
     const reg = AGENTS[id].mcp;
     if (reg.kind === "none") continue;
 
-    const cmd = commandFor(projectRoot, reg.scope, options);
+    const cmd = commandFor(options);
     switch (reg.kind) {
       case "json": {
         // Claude Code and Cursor can both land on the same file in principle;

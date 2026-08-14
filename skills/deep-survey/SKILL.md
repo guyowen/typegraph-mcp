@@ -33,7 +33,7 @@ For TypeScript symbols, types, references, call chains, boundaries, hover conten
 
 Run the health check first from the project root:
 ```bash
-"__TYPEGRAPH_NODE__" "__TYPEGRAPH_CLI__" check --project-root "." --tsconfig "__TYPEGRAPH_TSCONFIG__"
+__TYPEGRAPH_NODE__ "__TYPEGRAPH_CLI__" check --project-root "." --tsconfig "__TYPEGRAPH_TSCONFIG__"
 ```
 
 <!-- Placeholders are substituted at install time by src/install-skills.ts.

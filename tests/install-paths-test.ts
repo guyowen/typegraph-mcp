@@ -1,23 +1,31 @@
 import assert from "node:assert";
-import { fnmDefaultInterpreter } from "../src/install-paths.ts";
+import { serverArgFor, supportsNativeTypeScript } from "../src/install-paths.ts";
 
-console.log("fnm default interpreter paths");
+console.log("runtime and portable server paths");
 
-assert.equal(
-  fnmDefaultInterpreter(
-    "/Users/example/.local/share/fnm/node-versions/v24.11.0/installation/bin/node",
-  ),
-  "/Users/example/.local/share/fnm/aliases/default/bin/node",
-);
-console.log("  ok  POSIX version path resolves through the default alias");
+assert.equal(supportsNativeTypeScript("22.18.0"), true);
+assert.equal(supportsNativeTypeScript("22.17.9"), false);
+assert.equal(supportsNativeTypeScript("24.0.0"), true);
+console.log("  ok  Node runtime floor is exact");
 
 assert.equal(
-  fnmDefaultInterpreter(
-    String.raw`C:\Users\example\AppData\Roaming\fnm\node-versions\v24.11.0\installation\node.exe`,
-  ),
-  String.raw`C:\Users\example\AppData\Roaming\fnm\aliases\default\node.exe`,
+  serverArgFor({
+    packageRoot: String.raw`C:\repo\node_modules\typegraph-mcp`,
+    absolute: String.raw`C:\repo\node_modules\typegraph-mcp\dist\server.cjs`,
+    relative: String.raw`node_modules\typegraph-mcp\dist\server.cjs`,
+    stable: true,
+  }),
+  "node_modules/typegraph-mcp/dist/server.cjs",
 );
-console.log("  ok  Windows version path resolves through the default alias");
+console.log("  ok  Windows project paths are portable in committed configs");
 
-assert.equal(fnmDefaultInterpreter("/usr/local/bin/node"), undefined);
-console.log("  ok  unmanaged interpreter is left alone");
+assert.equal(
+  serverArgFor({
+    packageRoot: "/opt/typegraph-mcp",
+    absolute: "/opt/typegraph-mcp/dist/server.cjs",
+    relative: null,
+    stable: true,
+  }),
+  "/opt/typegraph-mcp/dist/server.cjs",
+);
+console.log("  ok  external checkout fallback remains absolute");

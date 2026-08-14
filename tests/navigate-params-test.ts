@@ -30,7 +30,11 @@ fs.writeFileSync(
 );
 // getExePath resolves `typescript` from cwd, so the fixture needs its own.
 fs.mkdirSync(path.join(tmp, "node_modules"), { recursive: true });
-fs.symlinkSync(path.join(repoRoot, "node_modules/typescript"), path.join(tmp, "node_modules/typescript"));
+fs.symlinkSync(
+  path.join(repoRoot, "node_modules/typescript"),
+  path.join(tmp, "node_modules/typescript"),
+  process.platform === "win32" ? "junction" : "dir",
+);
 
 // 25 exported symbols containing "Widget", one of them named exactly "Widget".
 const decls = ["export interface Widget { id: string }"];

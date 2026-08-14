@@ -19,7 +19,7 @@ fs.mkdirSync(path.join(tmp, "node_modules"), { recursive: true });
 fs.symlinkSync(
   path.join(repoRoot, "node_modules", "typescript"),
   path.join(tmp, "node_modules", "typescript"),
-  "dir",
+  process.platform === "win32" ? "junction" : "dir",
 );
 fs.writeFileSync(
   path.join(tmp, "tsconfig.json"),

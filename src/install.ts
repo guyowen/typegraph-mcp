@@ -21,7 +21,7 @@ import {
   SKILL_NAMES,
   skillsDirFor,
 } from "./install-skills.ts";
-import { resolveInterpreter, resolveServerTarget } from "./install-paths.ts";
+import { resolveServerTarget } from "./install-paths.ts";
 import { deregisterMcp, registerMcp } from "./mcp-register.ts";
 
 const SNIPPET_MARKER = "## TypeScript Navigation (typegraph-mcp)";
@@ -260,6 +260,21 @@ function cleanupLegacyPluginInstall(projectRoot: string, sourceDir: string): str
 }
 
 export async function setup(projectRoot: string, sourceDir: string, yes: boolean): Promise<void> {
+  const configuredTsconfig = process.env["TYPEGRAPH_TSCONFIG"] || "./tsconfig.json";
+  const tsconfigAbs = path.resolve(projectRoot, configuredTsconfig);
+  const relativeTsconfig = path.relative(projectRoot, tsconfigAbs);
+  if (
+    relativeTsconfig === "" ||
+    relativeTsconfig === ".." ||
+    relativeTsconfig.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relativeTsconfig)
+  ) {
+    throw new Error(
+      `The setup tsconfig must be inside the project root so generated configs remain portable: ${configuredTsconfig}`,
+    );
+  }
+  const tsconfig = `./${relativeTsconfig.replaceAll("\\", "/")}`;
+
   p.intro("typegraph-mcp setup");
 
   const selected = await selectAgents(projectRoot, yes);
@@ -271,10 +286,8 @@ export async function setup(projectRoot: string, sourceDir: string, yes: boolean
   const target = resolveServerTarget(projectRoot, sourceDir);
   const rel = target.relative ?? target.absolute;
   p.log.info(`Server: ${rel}${target.relative ? "" : "  (absolute — not a project dependency)"}`);
-  if (target.note) (target.stable ? p.log.info : p.log.warn)(target.note);
+  if (target.note) p.log.warn(target.note);
 
-  const tsconfig = process.env["TYPEGRAPH_TSCONFIG"] || "./tsconfig.json";
-  const tsconfigAbs = path.resolve(projectRoot, tsconfig);
   if (!fs.existsSync(tsconfigAbs)) {
     p.log.warn(
       `No tsconfig found at ${tsconfig}. TSGo semantic tools require an explicit tsconfig; ` +
@@ -297,15 +310,11 @@ export async function setup(projectRoot: string, sourceDir: string, yes: boolean
   if (skills.unchanged > 0) p.log.info(`${skills.unchanged} skills already up to date`);
 
   // 3. MCP registration
-  const interpreter = resolveInterpreter();
-  if (!interpreter.stable && interpreter.note) p.log.warn(interpreter.note);
-
   // No tsx at runtime. Source checkouts use the src/*.cjs trampolines to import
   // .ts directly after a Node-version guard; published packages use the same
   // trampolines from dist/ and import compiled .js because Node refuses native
   // type stripping for .ts files under node_modules.
   const results = registerMcp(projectRoot, selected, {
-    interpreter: interpreter.command,
     target,
     tsconfig,
   });

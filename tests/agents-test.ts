@@ -8,6 +8,7 @@
  * would then discover every skill more than once.
  */
 import assert from "node:assert";
+import path from "node:path";
 import {
   AGENTS,
   AGENT_IDS,
@@ -121,12 +122,12 @@ test("claude-code registers through project .mcp.json, not a plugin", () => {
   assert.strictEqual(reg.kind === "json" && reg.rootKey, "mcpServers");
 });
 
-test("no agent is global-scoped", () => {
-  const global = AGENT_IDS.filter((id) => {
+test("every JSON MCP config is project-relative by construction", () => {
+  const files = AGENT_IDS.flatMap((id) => {
     const reg = AGENTS[id].mcp;
-    return reg.kind !== "none" && reg.scope === "global";
+    return reg.kind === "json" ? [reg.file] : [];
   });
-  assert.deepStrictEqual(global, []);
+  assert.ok(files.every((file) => !path.isAbsolute(file)));
 });
 
 test("projectJsonMcpConfigs covers every project JSON config once", () => {

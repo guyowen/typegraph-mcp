@@ -170,7 +170,7 @@ and no vendored copy to drift out of sync with the one npm manages.
 | OpenCode | `.claude/skills/` or `.agents/skills/` (whichever is already written) | `opencode.json(c)` |
 | Codex | `.agents/skills/` | `.codex/config.toml` |
 | Copilot | `.agents/skills/` | `.vscode/mcp.json` |
-| Antigravity | `.agents/skills/` | `~/.gemini/antigravity/mcp_config.json` |
+| Antigravity | `.agents/skills/` | `.agents/mcp_config.json` |
 | Gemini CLI | `.agents/skills/` | — none; register manually |
 
 Cursor and OpenCode each read several of these locations, so
@@ -181,11 +181,10 @@ otherwise the flexible agents would discover every skill more than once.
 ### Which copy of the server gets registered
 
 `resolveServerTarget()` prefers a copy resolvable *from the project* — a real
-dependency — and writes a **project-relative** path for it. That matters
-because `.mcp.json`, `.cursor/mcp.json` and `opencode.json` normally get
-committed: an absolute path resolves only on the machine that ran `setup`.
-Antigravity's config lives in `$HOME` and cannot use a relative path for either
-the server or the project root, so it alone gets absolutes.
+dependency — and writes a **project-relative**, forward-slash path for it. All
+supported MCP configs are project-scoped and normally get committed: an
+installer-machine absolute path or Windows-only separator would fail on a
+teammate's checkout.
 
 Falling back to the running copy is fine for a global install or a dev
 checkout, but an npx-cache path is flagged: npm garbage-collects that
@@ -197,8 +196,12 @@ The literal `node_modules/typegraph-mcp` is preferred over what
 version-pinned path that dies on the next upgrade. The symlink is the stable
 name. Copied skills follow the same rule: from the project root, their health
 check calls the package's project-relative public CLI with explicit
-`--project-root` and `--tsconfig` options. Moving the checkout does not stale the
-command, and the command assumes neither Git nor POSIX environment syntax.
+`--project-root` and `--tsconfig` options. Both `--flag value` and
+`--flag=value` forms are accepted. Setup normalizes an in-project tsconfig to a
+project-relative path and rejects an external one rather than baking an
+installer-machine absolute into committed files. Moving the checkout does not
+stale the command, and the command assumes neither Git nor POSIX environment
+syntax.
 
 ### Public entry points, no flag
 
@@ -228,9 +231,9 @@ statically.
 
 1. **`${CLAUDE_PLUGIN_ROOT}` was never expanded** for non-Claude agents. Only Claude Code expands it, and only for plugin-discovered skills — so `.agents/skills/` copies shipped it literally. With no plugin directory at all, nothing would expand it anywhere. Installed project dependencies now use their project-relative public CLI; an external package checkout is the explicitly warned, absolute fallback.
 
-2. **Baked interpreter paths rot.** Committed project configs and skills use `node` from PATH so they work across machines and operating systems; the CLI trampoline reports a clear error below Node 22.18. The one global config cannot be project-relative, so `resolveInterpreter()` prefers nvm/fnm's compatible `default` alias, then a compatible `node` on PATH, before falling back to the current executable. `typegraph-mcp check` detects both dead paths and too-old interpreters.
+2. **Baked interpreter paths rot.** Every supported config is project-scoped. Committed configs and skills therefore use `node` from PATH instead of an installer-machine nvm/fnm/mise path; the CLI trampoline reports a clear error below Node 22.18, and `typegraph-mcp check` verifies the command actually stored in each config.
 
-3. **Global MCP entries were never removed.** `remove` deregistered project configs but left Antigravity's `~/.gemini/antigravity/mcp_config.json` entry behind, pointing at an uninstalled server.
+3. **Legacy global MCP entries were never removed.** Older releases wrote Antigravity under `~/.gemini/antigravity/mcp_config.json`. Current releases use project `.agents/mcp_config.json`, while setup/remove still clean the retired global entry.
 
 ## Commands
 
@@ -283,7 +286,8 @@ skill paths portable across machines and checkout moves.
 
 `check` verifies the three things that otherwise fail silently: the tsgo binary
 resolves, the client/binary versions still agree, and every installed config's
-interpreter is present/new enough while the server path still exists on disk.
+PATH-resolved Node is present/new enough while the server path still exists on
+disk.
 
 `opencode.jsonc` is handled properly — `src/jsonc.ts` is a string-aware comment
 stripper, so a config containing `https://example.com//docs` survives
