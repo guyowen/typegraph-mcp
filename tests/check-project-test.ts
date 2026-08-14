@@ -103,6 +103,23 @@ function runCheckWithCliEqualsOptions(
   return { status: result.status, output: `${result.stdout}${result.stderr}` };
 }
 
+function runCheckWithDuplicateOption(
+  projectRoot: string,
+  cwd: string,
+  form: "split" | "equals",
+): { status: number | null; output: string } {
+  const args =
+    form === "split"
+      ? ["check", "--project-root", projectRoot, "--project-root", cwd]
+      : ["check", `--project-root=${projectRoot}`, `--project-root=${cwd}`];
+  const result = spawnSync(process.execPath, [cli, ...args], {
+    cwd,
+    env: { ...process.env, TYPEGRAPH_TSCONFIG: "./tsconfig.json" },
+    encoding: "utf-8",
+  });
+  return { status: result.status, output: `${result.stdout}${result.stderr}` };
+}
+
 try {
   console.log("project environment checks");
 
@@ -137,6 +154,15 @@ try {
       explicitEqualsCli.output.includes("tsconfig.json exists"),
     explicitEqualsCli.output,
   );
+
+  for (const form of ["split", "equals"] as const) {
+    const duplicate = runCheckWithDuplicateOption(goodProject, tempRoot, form);
+    check(
+      `duplicate ${form} option is rejected instead of selecting one target`,
+      duplicate.status === 1 && duplicate.output.includes("--project-root may only be provided once"),
+      duplicate.output,
+    );
+  }
 
   const ts5Project = makeProject("ts5", { tsconfig: true, typescript: "ts5-stub" });
   const ts5 = runCheck(ts5Project, tempRoot);

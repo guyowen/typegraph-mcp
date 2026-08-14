@@ -23,6 +23,7 @@ import {
   type AgentId,
   type SkillsDir,
 } from "./agents.ts";
+import { portableNodePath } from "./install-paths.ts";
 
 export const SKILL_NAMES = [
   "tool-selection",
@@ -73,8 +74,8 @@ function portableCliEntrypoint(projectRoot: string, packageRoot: string): string
   const absolute = cliEntrypoint(packageRoot);
   const relative = path.relative(projectRoot, absolute);
   const isInside = relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
-  if (!isInside) return absolute;
-  const portable = relative.split(path.sep).join("/");
+  if (!isInside) return portableNodePath(absolute);
+  const portable = portableNodePath(relative);
   return `./${portable}`;
 }
 

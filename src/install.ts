@@ -12,6 +12,7 @@
  */
 import * as p from "@clack/prompts";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { AGENTS, AGENT_IDS, type AgentId } from "./agents.ts";
 import {
@@ -99,15 +100,19 @@ function removeAgentSnippet(projectRoot: string, relPath: string): boolean {
 }
 
 function pathEqualsOrContains(candidatePath: string, targetPath: string): boolean {
-  const resolvedCandidate = path.resolve(candidatePath);
-  const resolvedTarget = path.resolve(targetPath);
+  const comparable = (value: string): string => {
+    const resolved = path.resolve(value);
+    return process.platform === "win32" ? resolved.toLowerCase() : resolved;
+  };
+  const resolvedCandidate = comparable(candidatePath);
+  const resolvedTarget = comparable(targetPath);
   if (resolvedCandidate === resolvedTarget || resolvedCandidate.startsWith(resolvedTarget + path.sep)) {
     return true;
   }
 
   try {
-    const realCandidate = fs.realpathSync(candidatePath);
-    const realTarget = fs.realpathSync(targetPath);
+    const realCandidate = comparable(fs.realpathSync(candidatePath));
+    const realTarget = comparable(fs.realpathSync(targetPath));
     return realCandidate === realTarget || realCandidate.startsWith(realTarget + path.sep);
   } catch {
     return false;
@@ -197,9 +202,7 @@ function removeLegacyClaudeMcp(projectRoot: string): boolean {
 }
 
 function removeLegacyGlobalCodex(projectRoot: string): boolean {
-  const home = process.env["HOME"];
-  if (!home) return false;
-
+  const home = os.homedir();
   const globalConfig = path.join(home, ".codex/config.toml");
   if (!fs.existsSync(globalConfig)) return false;
 
@@ -263,17 +266,17 @@ export async function setup(projectRoot: string, sourceDir: string, yes: boolean
   const configuredTsconfig = process.env["TYPEGRAPH_TSCONFIG"] || "./tsconfig.json";
   const tsconfigAbs = path.resolve(projectRoot, configuredTsconfig);
   const relativeTsconfig = path.relative(projectRoot, tsconfigAbs);
+  const outsideProject = relativeTsconfig === ".." || relativeTsconfig.startsWith(`..${path.sep}`);
   if (
-    relativeTsconfig === "" ||
-    relativeTsconfig === ".." ||
-    relativeTsconfig.startsWith(`..${path.sep}`) ||
-    path.isAbsolute(relativeTsconfig)
+    path.isAbsolute(relativeTsconfig) ||
+    (path.isAbsolute(configuredTsconfig) && (relativeTsconfig === "" || outsideProject))
   ) {
     throw new Error(
-      `The setup tsconfig must be inside the project root so generated configs remain portable: ${configuredTsconfig}`,
+      `An absolute setup tsconfig must be inside the project root so generated configs remain portable: ${configuredTsconfig}`,
     );
   }
-  const tsconfig = `./${relativeTsconfig.replaceAll("\\", "/")}`;
+  const portableTsconfig = relativeTsconfig.replaceAll("\\", "/");
+  const tsconfig = outsideProject ? portableTsconfig : `./${portableTsconfig}`;
 
   p.intro("typegraph-mcp setup");
 

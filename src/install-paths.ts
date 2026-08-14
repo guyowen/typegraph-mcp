@@ -117,6 +117,10 @@ export function resolveServerTarget(projectRoot: string, sourceDir: string): Ser
 }
 
 /** Node accepts forward slashes on every supported platform. */
+export function portableNodePath(value: string): string {
+  return value.replaceAll("\\", "/");
+}
+
 export function serverArgFor(target: ServerTarget): string {
-  return (target.relative ?? target.absolute).replaceAll("\\", "/");
+  return portableNodePath(target.relative ?? target.absolute);
 }

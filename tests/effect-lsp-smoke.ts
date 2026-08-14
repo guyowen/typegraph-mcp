@@ -108,8 +108,13 @@ if (!fs.existsSync(effectPackage)) {
   try {
     fs.mkdirSync(path.join(tmp, "src"), { recursive: true });
     fs.mkdirSync(path.join(tmp, "node_modules"), { recursive: true });
-    fs.symlinkSync(effectPackage, path.join(tmp, "node_modules", "effect"), "dir");
-    fs.symlinkSync(path.join(repoRoot, "node_modules", "typescript"), path.join(tmp, "node_modules", "typescript"), "dir");
+    const symlinkType = process.platform === "win32" ? "junction" : "dir";
+    fs.symlinkSync(effectPackage, path.join(tmp, "node_modules", "effect"), symlinkType);
+    fs.symlinkSync(
+      path.join(repoRoot, "node_modules", "typescript"),
+      path.join(tmp, "node_modules", "typescript"),
+      symlinkType,
+    );
     fs.writeFileSync(
       path.join(tmp, "tsconfig.json"),
       JSON.stringify(

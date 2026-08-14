@@ -1,5 +1,9 @@
 import assert from "node:assert";
-import { serverArgFor, supportsNativeTypeScript } from "../src/install-paths.ts";
+import {
+  portableNodePath,
+  serverArgFor,
+  supportsNativeTypeScript,
+} from "../src/install-paths.ts";
 
 console.log("runtime and portable server paths");
 
@@ -29,3 +33,9 @@ assert.equal(
   "/opt/typegraph-mcp/dist/server.cjs",
 );
 console.log("  ok  external checkout fallback remains absolute");
+
+assert.equal(
+  portableNodePath(String.raw`C:\Users\example\typegraph-mcp\dist\cli.cjs`),
+  "C:/Users/example/typegraph-mcp/dist/cli.cjs",
+);
+console.log("  ok  Windows external-checkout skill paths use portable separators");

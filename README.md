@@ -197,11 +197,12 @@ version-pinned path that dies on the next upgrade. The symlink is the stable
 name. Copied skills follow the same rule: from the project root, their health
 check calls the package's project-relative public CLI with explicit
 `--project-root` and `--tsconfig` options. Both `--flag value` and
-`--flag=value` forms are accepted. Setup normalizes an in-project tsconfig to a
-project-relative path and rejects an external one rather than baking an
-installer-machine absolute into committed files. Moving the checkout does not
-stale the command, and the command assumes neither Git nor POSIX environment
-syntax.
+`--flag=value` forms are accepted, and duplicates are rejected. Setup
+normalizes an in-project absolute tsconfig to a project-relative path, accepts
+portable relative parent paths used by monorepos, and rejects an absolute path
+outside the project rather than baking an installer-machine location into
+committed files. Moving the checkout does not stale the command, and the
+command assumes neither Git nor POSIX environment syntax.
 
 ### Public entry points, no flag
 

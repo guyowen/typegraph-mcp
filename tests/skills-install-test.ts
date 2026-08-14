@@ -74,9 +74,15 @@ for (const target of res.targets as SkillsDir[]) {
 
 const codexCopy = path.join(tmp, ".agents/skills/deep-survey/SKILL.md");
 assert.ok(fs.existsSync(codexCopy), "codex should receive deep-survey via .agents/skills");
+// Simulate Git for Windows checking out the template with CRLF. Parsing the
+// copied command must not leak a carriage return into the final CLI argument.
+fs.writeFileSync(
+  codexCopy,
+  fs.readFileSync(codexCopy, "utf8").replaceAll("\r\n", "\n").replaceAll("\n", "\r\n"),
+);
 const prereq = fs
   .readFileSync(codexCopy, "utf8")
-  .split("\n")
+  .split(/\r?\n/)
   .find((l) => l.includes("typegraph-mcp") && l.includes("check"));
 console.log(`\ndeep-survey prerequisite as installed for Codex:\n  ${prereq}`);
 
@@ -109,6 +115,10 @@ assert.deepEqual(health.argv, [
   "./tsconfig.typegraph.json",
 ]);
 console.log("  ok  generated command executes after relocating the project");
+
+const attributes = fs.readFileSync(path.join(sourceDir, ".gitattributes"), "utf-8");
+assert.ok(attributes.includes("* text=auto eol=lf"));
+console.log("  ok  repository checkout pins generated text to LF");
 
 fs.rmSync(moved, { recursive: true, force: true });
 

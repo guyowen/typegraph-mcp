@@ -114,7 +114,7 @@ fs.writeFileSync(
 const run = (...args: string[]): string =>
   execFileSync(process.execPath, [cli, ...args], {
     cwd: tmp,
-    env: { ...process.env, HOME: fakeHome, TYPEGRAPH_PROJECT_ROOT: tmp },
+    env: { ...process.env, HOME: fakeHome, USERPROFILE: fakeHome, TYPEGRAPH_PROJECT_ROOT: tmp },
     encoding: "utf-8",
   });
 
@@ -325,7 +325,7 @@ const rejected = spawnSync(
   [cli, "setup", "--yes", "--project-root", tmp, "--tsconfig", outsideTsconfig],
   {
     cwd: tmp,
-    env: { ...process.env, HOME: fakeHome },
+    env: { ...process.env, HOME: fakeHome, USERPROFILE: fakeHome },
     encoding: "utf-8",
   },
 );
@@ -344,6 +344,19 @@ check(
   "rejected setup leaves skills untouched",
   fs.readFileSync(path.join(tmp, ".claude/skills/deep-survey/SKILL.md"), "utf-8") ===
     skillBeforeReject,
+);
+fs.rmSync(outsideTsconfig, { force: true });
+
+console.log("\nrelative parent tsconfig remains portable for monorepo packages");
+fs.writeFileSync(outsideTsconfig, "{}\n");
+const parentRelative = path.relative(tmp, outsideTsconfig);
+run("setup", "--yes", "--tsconfig", parentRelative);
+const parentMcp = readJson(".mcp.json").mcpServers?.["typegraph-mcp"];
+check(
+  "relative parent tsconfig is retained without an absolute leak",
+  parentMcp?.env?.TYPEGRAPH_TSCONFIG === parentRelative.replaceAll("\\", "/") &&
+    !parentMcp?.env?.TYPEGRAPH_TSCONFIG.includes(tmp),
+  parentMcp?.env?.TYPEGRAPH_TSCONFIG,
 );
 fs.rmSync(outsideTsconfig, { force: true });
 
