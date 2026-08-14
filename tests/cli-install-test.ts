@@ -18,6 +18,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
+import { portableNodePath } from "../src/install-paths.ts";
 
 const repoRoot = path.resolve(import.meta.dirname, "..");
 const cli = path.join(repoRoot, "src/cli.cjs");
@@ -165,7 +166,7 @@ check(
   "no unexpanded placeholder",
   !claudeSkill.includes("__TYPEGRAPH_") && !claudeSkill.includes("${CLAUDE_PLUGIN_ROOT}"),
 );
-check("skill points at the real package root", claudeSkill.includes(repoRoot));
+check("skill points at the real package root", claudeSkill.includes(portableNodePath(repoRoot)));
 
 console.log("\nMCP registration");
 const mcp = readJson(".mcp.json");
