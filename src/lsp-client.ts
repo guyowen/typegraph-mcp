@@ -174,6 +174,7 @@ function normalizeWorkspaceEdit(edit: any): LspWorkspaceEdit | undefined {
 
 export class LspClient {
   #proc: ChildProcess | undefined;
+  #closed: Promise<void> | undefined;
   #buf = Buffer.alloc(0);
   #pending = new Map<number, { resolve: (v: any) => void; reject: (e: Error) => void }>();
   #nextId = 1;
@@ -184,17 +185,24 @@ export class LspClient {
 
   readonly exePath: string;
   readonly rootDir: string;
+  readonly args: readonly string[];
 
-  constructor(exePath: string, rootDir: string) {
+  constructor(exePath: string, rootDir: string, args: readonly string[] = ["--lsp", "-stdio"]) {
     this.exePath = exePath;
     this.rootDir = rootDir;
+    this.args = args;
   }
 
   async start(): Promise<void> {
     this.#failed = false;
-    this.#proc = spawn(this.exePath, ["--lsp", "-stdio"], {
+    this.#proc = spawn(this.exePath, this.args, {
       cwd: this.rootDir,
       stdio: ["pipe", "pipe", "pipe"],
+    });
+    const proc = this.#proc;
+    this.#closed = new Promise((resolve) => {
+      proc.once("close", () => resolve());
+      proc.once("error", () => resolve());
     });
     const failAll = (err: Error): void => {
       this.#failed = true;
@@ -459,15 +467,50 @@ export class LspClient {
   }
 
   async stop(): Promise<void> {
-    try {
-      if (!this.#failed && this.#proc?.exitCode === null && this.#proc.signalCode === null) {
-        await this.#request("shutdown", null);
-        this.#notify("exit", null);
+    const proc = this.#proc;
+    const closed = this.#closed;
+    if (!proc || !closed) return;
+
+    let exitNotified = false;
+    if (!this.#failed && proc.exitCode === null && proc.signalCode === null) {
+      const shutdown = this.#request("shutdown", null);
+      if (await resolvesWithin(shutdown, 1_000)) {
+        try {
+          this.#notify("exit", null);
+          exitNotified = true;
+        } catch {
+          /* child closed after the shutdown response */
+        }
       }
-    } catch {
-      /* shutting down anyway */
     }
-    this.#proc?.kill();
+
+    // The LSP protocol asks the server to terminate after the exit notification.
+    // Await its close event so callers can safely remove the project directory on
+    // Windows, where a live child retains a handle on its cwd. A broken server is
+    // still bounded: terminate after the grace period and wait once more.
+    const closedGracefully = exitNotified && (await resolvesWithin(closed, 1_000));
+    if (!closedGracefully) {
+      if (proc.exitCode === null && proc.signalCode === null) proc.kill("SIGKILL");
+      await resolvesWithin(closed, 1_000);
+    }
     this.#proc = undefined;
+    this.#closed = undefined;
+  }
+}
+
+async function resolvesWithin(promise: Promise<unknown>, timeoutMs: number): Promise<boolean> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      promise.then(
+        () => true,
+        () => false,
+      ),
+      new Promise<false>((resolve) => {
+        timer = setTimeout(() => resolve(false), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }

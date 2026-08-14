@@ -10,6 +10,7 @@
  * actually has Effect installed and configured.
  */
 import path from "node:path";
+import { removeTempTree } from "./test-fs.ts";
 import fs from "node:fs";
 import os from "node:os";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -172,7 +173,7 @@ export const program = Effect.gen(function* () {
       await synthetic.client.close();
     }
   } finally {
-    fs.rmSync(tmp, { recursive: true, force: true });
+    removeTempTree(tmp);
   }
 }
 

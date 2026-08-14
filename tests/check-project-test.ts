@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { removeTempTree } from "./test-fs.ts";
 
 const repoRoot = path.resolve(import.meta.dirname, "..");
 const cli = path.join(repoRoot, "src/cli.cjs");
@@ -184,7 +185,7 @@ try {
     missing.output,
   );
 } finally {
-  fs.rmSync(tempRoot, { recursive: true, force: true });
+  removeTempTree(tempRoot);
 }
 
 console.log(failures === 0 ? "\nOK — project checks are explicit" : `\n${failures} FAILURES`);

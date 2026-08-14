@@ -8,6 +8,7 @@
  */
 
 import * as path from "node:path";
+import { relativePathWithin } from "./path-containment.ts";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -55,8 +56,9 @@ export function resolveConfig(srcDir: string): TypegraphConfig {
   const projectRoot = inferProjectRoot(toolDir, cwd);
   const tsconfigPath = process.env["TYPEGRAPH_TSCONFIG"] || "./tsconfig.json";
 
-  const toolIsEmbedded = toolDir.startsWith(projectRoot + path.sep);
-  const toolRelPath = toolIsEmbedded ? path.relative(projectRoot, toolDir) : toolDir;
+  const relativeToolDir = relativePathWithin(projectRoot, toolDir);
+  const toolIsEmbedded = relativeToolDir !== undefined;
+  const toolRelPath = relativeToolDir ?? toolDir;
 
   return {
     projectRoot,

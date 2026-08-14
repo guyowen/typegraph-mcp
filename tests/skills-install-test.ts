@@ -25,6 +25,7 @@ import {
   TSCONFIG_PLACEHOLDER,
 } from "../src/install-skills.ts";
 import type { SkillsDir } from "../src/agents.ts";
+import { removeTempTree } from "./test-fs.ts";
 
 const sourceDir = path.resolve(import.meta.dirname, "..");
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tg-skills-"));
@@ -120,7 +121,7 @@ const attributes = fs.readFileSync(path.join(sourceDir, ".gitattributes"), "utf-
 assert.ok(attributes.includes("* text=auto eol=lf"));
 console.log("  ok  repository checkout pins generated text to LF");
 
-fs.rmSync(moved, { recursive: true, force: true });
+removeTempTree(moved);
 
 if (leaks.length > 0) {
   console.error(`\nFAIL: ${leaks.length} unexpanded placeholders`);

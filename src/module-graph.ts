@@ -11,6 +11,7 @@ import { parseSync } from "oxc-parser";
 import { ResolverFactory } from "oxc-resolver";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { relativePathWithin } from "./path-containment.ts";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -196,8 +197,8 @@ const SOURCE_EXTS = [".ts", ".tsx", ".mts", ".cts"];
  */
 function distToSource(resolvedPath: string, projectRoot: string): string {
   // Only remap paths within the project that contain /dist/
-  if (!resolvedPath.startsWith(projectRoot)) return resolvedPath;
-  const rel = path.relative(projectRoot, resolvedPath);
+  const rel = relativePathWithin(projectRoot, resolvedPath);
+  if (rel === undefined) return resolvedPath;
   const distIdx = rel.indexOf("dist" + path.sep);
   if (distIdx === -1) return resolvedPath;
 

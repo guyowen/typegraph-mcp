@@ -411,7 +411,7 @@ export class SemanticService {
       if (seen.has(key)) break;
       seen.add(key);
 
-      if (next.file.includes("node_modules") || next.file.endsWith(".d.ts")) break;
+      if (next.file.includes("node_modules") || /\.d\.(?:ts|mts|cts)$/i.test(next.file)) break;
 
       hops.push({
         file: next.file,

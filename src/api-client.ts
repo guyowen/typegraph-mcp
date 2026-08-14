@@ -15,6 +15,11 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { API } from "typescript/unstable/async";
+import {
+  relativePathWithin,
+  type CanonicalizePath,
+  type PathApi,
+} from "./path-containment.ts";
 import { assertVersionsAgree, type VersionInfo } from "./version-guard.ts";
 
 const require = createRequire(import.meta.url);
@@ -105,18 +110,16 @@ export interface ApiClientOptions {
 export function isProjectSourceFile(
   projectRoot: string,
   fileName: string,
-  pathApi: Pick<typeof path, "relative" | "isAbsolute" | "sep"> = path,
+  pathApi: PathApi = path,
+  canonicalize?: CanonicalizePath,
 ): boolean {
-  const relative = pathApi.relative(projectRoot, fileName);
-  if (
-    relative === ".." ||
-    relative.startsWith(`..${pathApi.sep}`) ||
-    pathApi.isAbsolute(relative)
-  ) {
-    return false;
-  }
+  if (/\.d\.(?:ts|mts|cts)$/i.test(fileName)) return false;
+  const relative = relativePathWithin(projectRoot, fileName, pathApi, canonicalize);
+  if (relative === undefined) return false;
   const segments = relative.split(pathApi.sep);
-  return !segments.includes("node_modules") && !fileName.toLowerCase().endsWith(".d.ts");
+  return !segments.some((segment) =>
+    pathApi.sep === "\\" ? segment.toLowerCase() === "node_modules" : segment === "node_modules",
+  );
 }
 
 /**

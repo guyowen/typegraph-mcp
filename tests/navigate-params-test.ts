@@ -19,6 +19,7 @@ import os from "node:os";
 import path from "node:path";
 import { ApiClient } from "../src/api-client.ts";
 import { NavigateTo, DEFAULT_MAX_RESULTS } from "../src/navigate-to.ts";
+import { removeTempTree } from "./test-fs.ts";
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tg-nav-"));
 const repoRoot = path.resolve(import.meta.dirname, "..");
@@ -131,9 +132,7 @@ try {
   await nav.close();
   await api.close();
   process.chdir(repoRoot);
-  // Windows can retain the compiler's directory handle for a few milliseconds
-  // after the awaited shutdown. Retry only transient recursive-removal errors.
-  fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  removeTempTree(tmp);
 }
 
 console.log(failures === 0 ? "\nOK — file and maxResults behave" : `\n${failures} FAILURES`);

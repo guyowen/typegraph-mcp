@@ -10,6 +10,7 @@ import os from "node:os";
 import path from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { removeTempTree } from "./test-fs.ts";
 
 const repoRoot = path.resolve(import.meta.dirname, "..");
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tg-inval-"));
@@ -89,6 +90,6 @@ const survivor = await call("ts_navigate_to", { symbol: "alpha" });
 check("untouched export still indexed", survivor.exportHits === 1, `exportHits=${survivor.exportHits}`);
 
 await client.close();
-fs.rmSync(tmp, { recursive: true, force: true });
+removeTempTree(tmp);
 console.log(failures === 0 ? "\nOK — live edits propagate" : `\n${failures} FAILURES`);
 process.exit(failures === 0 ? 0 : 1);

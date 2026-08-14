@@ -17,6 +17,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { removeTempTree } from "./test-fs.ts";
 import { execFileSync, spawnSync } from "node:child_process";
 import { portableNodePath } from "../src/install-paths.ts";
 
@@ -413,6 +414,6 @@ check(
 );
 check("the dependency itself is untouched", fs.existsSync(path.join(dep, "dist/server.cjs")));
 
-fs.rmSync(tmp, { recursive: true, force: true });
+removeTempTree(tmp);
 console.log(failures === 0 ? "\nOK — installer round-trip clean" : `\n${failures} FAILURES`);
 process.exit(failures === 0 ? 0 : 1);
