@@ -1,7 +1,7 @@
 /**
  * Verifies the two inherited installer bugs are actually fixed:
  *  - no ${CLAUDE_PLUGIN_ROOT} or __TYPEGRAPH_* placeholder survives to disk
- *  - the interpreter written is not a version-pinned nvm path
+ *  - the interpreter written is not a version-pinned nvm or fnm path
  *
  * The placeholder half matters more now than it did under the plugin layout:
  * skills are installed into directories the agent owns, and the package they
@@ -14,12 +14,14 @@ import os from "node:os";
 import path from "node:path";
 import {
   CHECK_PLACEHOLDER,
+  CLI_PLACEHOLDER,
   installSkills,
   skillsDirFor,
   LEGACY_PLACEHOLDERS,
   NODE_PLACEHOLDER,
   ROOT_PLACEHOLDER,
   SKILL_NAMES,
+  TSCONFIG_PLACEHOLDER,
 } from "../src/install-skills.ts";
 import { resolveInterpreter } from "../src/install-paths.ts";
 import type { SkillsDir } from "../src/agents.ts";
@@ -30,12 +32,13 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tg-skills-"));
 // is not the same directory the skills are written to.
 const packageRoot = path.join(tmp, "node_modules", "typegraph-mcp");
 fs.mkdirSync(path.join(packageRoot, "dist"), { recursive: true });
-fs.writeFileSync(path.join(packageRoot, "dist/check.cjs"), "// stand-in\n");
+fs.writeFileSync(path.join(packageRoot, "dist/cli.cjs"), "// stand-in\n");
 
 const res = installSkills({
   sourceDir,
   projectRoot: tmp,
   packageRoot,
+  tsconfig: "./tsconfig.typegraph.json",
   selectedAgents: ["claude-code", "codex", "opencode"],
 });
 
@@ -44,7 +47,14 @@ for (const [k, v] of Object.entries(res.byTarget)) {
   console.log(`  ${k}: ${v.dir.replace(tmp, "<proj>")} agents=[${v.agents.join(", ")}] written=${v.written}`);
 }
 
-const FORBIDDEN = [ROOT_PLACEHOLDER, NODE_PLACEHOLDER, CHECK_PLACEHOLDER, ...LEGACY_PLACEHOLDERS];
+const FORBIDDEN = [
+  ROOT_PLACEHOLDER,
+  NODE_PLACEHOLDER,
+  CHECK_PLACEHOLDER,
+  CLI_PLACEHOLDER,
+  TSCONFIG_PLACEHOLDER,
+  ...LEGACY_PLACEHOLDERS,
+];
 const leaks: string[] = [];
 
 for (const target of res.targets as SkillsDir[]) {
@@ -64,13 +74,22 @@ assert.ok(fs.existsSync(codexCopy), "codex should receive deep-survey via .agent
 const prereq = fs
   .readFileSync(codexCopy, "utf8")
   .split("\n")
-  .find((l) => l.includes("check.cjs"));
+  .find((l) => l.includes("typegraph-mcp") && l.includes("check"));
 console.log(`\ndeep-survey prerequisite as installed for Codex:\n  ${prereq}`);
 
 assert.ok(prereq, "prerequisite command line should exist");
 assert.ok(
-  prereq.includes(path.join(packageRoot, "dist/check.cjs")),
-  "prerequisite must point at the installed check entrypoint, not the skills directory",
+  prereq.includes('"node" "./node_modules/typegraph-mcp/dist/cli.cjs" check'),
+  "project dependency health check must use the portable public CLI",
+);
+assert.ok(!prereq.includes(tmp), "project dependency check must survive relocating the project");
+assert.ok(
+  prereq.includes('--project-root "."'),
+  "health check must explicitly target the consumer project",
+);
+assert.ok(
+  prereq.includes('--tsconfig "./tsconfig.typegraph.json"'),
+  "health check must use the configured tsconfig",
 );
 
 const interp = resolveInterpreter();
@@ -78,6 +97,10 @@ console.log(`\ninterpreter: ${interp.command} (stable=${interp.stable})`);
 assert.ok(
   !/\/\.nvm\/versions\/node\/v[^/]+\/bin\/node$/.test(interp.command),
   `interpreter must not be a version-pinned nvm path: ${interp.command}`,
+);
+assert.ok(
+  !/\/fnm\/node-versions\/v[^/]+\/installation\/bin\/node$/.test(interp.command),
+  `interpreter must not be a version-pinned fnm path: ${interp.command}`,
 );
 
 fs.rmSync(tmp, { recursive: true, force: true });

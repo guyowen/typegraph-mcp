@@ -3,8 +3,8 @@
  * and the MCP server script.
  *
  * Both are the same class of hazard — an absolute path written into a config
- * that outlives the thing it points at. nvm version dirs vanish on upgrade, and
- * an npm cache or dev-checkout path can disappear too.
+ * that outlives the thing it points at. Version-manager directories vanish on
+ * upgrade, and an npm cache or dev-checkout path can disappear too.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -44,19 +44,59 @@ function commandSupportsNativeTypeScript(command: string): boolean {
   return version !== null && supportsNativeTypeScript(version);
 }
 
+/** Resolve fnm's version-specific executable to its stable default alias. */
+export function fnmDefaultInterpreter(execPath: string): string | undefined {
+  const windowsPath = execPath.includes("\\") || execPath.toLowerCase().endsWith(".exe");
+  const normalized = execPath.replaceAll("\\", "/");
+  const match = /^(.*\/fnm)\/node-versions\/v[^/]+\/installation\/(?:bin\/node|node(?:\.exe)?)$/i.exec(
+    normalized,
+  );
+  if (!match) return undefined;
+  const candidate = windowsPath
+    ? `${match[1]}/aliases/default/node.exe`
+    : `${match[1]}/aliases/default/bin/node`;
+  return windowsPath ? candidate.replaceAll("/", "\\") : candidate;
+}
+
 /**
  * Pick an interpreter that satisfies the package runtime floor.
  *
- * `process.execPath` under nvm looks like
- * ~/.nvm/versions/node/v24.1.0/bin/node — that exact path disappears the moment
- * the user installs v24.14.0, silently breaking every config that baked it.
- * nvm maintains a `default` alias we can indirect through; failing that we fall
- * back to a compatible `node` on PATH, and only then to the absolute path that
- * is running setup. A version-pinned path is still better than a portable
- * command that resolves to Node too old to run this package.
+ * `process.execPath` under nvm and fnm contains the selected Node version — that
+ * exact path can disappear on upgrade, silently breaking every config that
+ * baked it. Both managers maintain a `default` alias we can indirect through;
+ * failing that we fall back to a compatible `node` on PATH, and only then to
+ * the absolute path that is running setup. A version-pinned path is still
+ * better than a portable command that resolves to Node too old to run this
+ * package.
  */
 export function resolveInterpreter(): { command: string; stable: boolean; note?: string } {
   const execPath = process.execPath;
+  const fnmDefault = fnmDefaultInterpreter(execPath);
+
+  if (fnmDefault) {
+    if (fs.existsSync(fnmDefault) && commandSupportsNativeTypeScript(fnmDefault)) {
+      return {
+        command: fnmDefault,
+        stable: true,
+        note: "resolved through the fnm default alias instead of a version-pinned installation",
+      };
+    }
+    if (commandSupportsNativeTypeScript("node")) {
+      return {
+        command: "node",
+        stable: true,
+        note: "using `node` from PATH — fnm version paths rot on upgrade",
+      };
+    }
+    return {
+      command: execPath,
+      stable: false,
+      note:
+        `using the current fnm Node because its default alias/PATH runtime is below ${MIN_NODE_VERSION}; ` +
+        "`check` will detect breakage after a Node upgrade",
+    };
+  }
+
   const nvmMatch = /^(.*\/\.nvm)\/versions\/node\/v[^/]+\/bin\/node$/.exec(execPath);
 
   if (nvmMatch) {

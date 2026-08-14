@@ -23,12 +23,25 @@ import path from "node:path";
 
 const USAGE = `typegraph-mcp — type-aware TypeScript navigation for AI agents
 
-  typegraph-mcp setup [--yes]   install MCP config + skills for detected agents
-  typegraph-mcp remove          undo it
-  typegraph-mcp check           verify binary, versions, and installed paths
+  typegraph-mcp setup [--yes] [--project-root PATH] [--tsconfig PATH]
+                               install MCP config + skills for detected agents
+  typegraph-mcp remove [--project-root PATH]
+                               undo it
+  typegraph-mcp check [--project-root PATH] [--tsconfig PATH]
+                               verify binary, versions, and installed paths
 
   typegraph-mcp                 with stdio piped, serves MCP
 `;
+
+function optionValue(args: readonly string[], name: string): string | undefined {
+  const index = args.indexOf(name);
+  if (index === -1) return undefined;
+  const value = args[index + 1];
+  if (value === undefined || value.startsWith("--")) {
+    throw new Error(`${name} requires a value`);
+  }
+  return value;
+}
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
@@ -50,9 +63,12 @@ async function main(): Promise<void> {
   }
 
   const yes = args.includes("--yes") || args.includes("-y");
-  const projectRoot = process.env["TYPEGRAPH_PROJECT_ROOT"]
-    ? path.resolve(process.env["TYPEGRAPH_PROJECT_ROOT"])
-    : process.cwd();
+  const projectRootOption = optionValue(args, "--project-root");
+  const tsconfigOption = optionValue(args, "--tsconfig");
+  const configuredProjectRoot = projectRootOption ?? process.env["TYPEGRAPH_PROJECT_ROOT"];
+  const projectRoot = configuredProjectRoot ? path.resolve(configuredProjectRoot) : process.cwd();
+  if (projectRootOption) process.env["TYPEGRAPH_PROJECT_ROOT"] = projectRoot;
+  if (tsconfigOption) process.env["TYPEGRAPH_TSCONFIG"] = tsconfigOption;
   const sourceDir = path.resolve(import.meta.dirname, "..");
 
   switch (command) {

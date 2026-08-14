@@ -31,15 +31,16 @@ For TypeScript symbols, types, references, call chains, boundaries, hover conten
 
 ## Prerequisites
 
-Run the health check first:
+Run the health check first from the project root:
 ```bash
-"__TYPEGRAPH_NODE__" "__TYPEGRAPH_CHECK__"
+"__TYPEGRAPH_NODE__" "__TYPEGRAPH_CLI__" check --project-root "." --tsconfig "__TYPEGRAPH_TSCONFIG__"
 ```
 
-<!-- Both placeholders are substituted with absolute paths at install time by
-     src/install-skills.ts. Do NOT use ${CLAUDE_PLUGIN_ROOT} here: nothing
-     expands it. Only Claude Code ever did, and only for skills discovered from
-     a plugin directory — which this installer no longer creates. -->
+<!-- Placeholders are substituted at install time by src/install-skills.ts.
+     Project dependencies use a project-relative public CLI path so a moved
+     checkout remains valid without assuming Git or POSIX environment syntax.
+     External package checkouts stay absolute and are already reported as
+     non-portable by setup. -->
 
 
 Then run:

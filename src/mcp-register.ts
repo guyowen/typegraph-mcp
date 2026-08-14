@@ -9,10 +9,10 @@
  *
  * Scope is the other axis. Project-scoped configs (.mcp.json, .cursor/mcp.json,
  * opencode.json, .codex/config.toml) live in the repo and normally get
- * committed, so they receive a project-relative server path — an absolute one
- * would resolve only on the machine that ran setup. Antigravity's config is in
- * $HOME and cannot use a relative path for either the server or the project
- * root, so it gets absolutes for both.
+ * committed, so they receive a project-relative server path and `node` from
+ * PATH — installer-machine absolute paths would resolve only for that user.
+ * Antigravity's config is in $HOME and cannot use a relative path for either
+ * the server or the project root, so it gets absolutes for both.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -236,7 +236,7 @@ function commandFor(
   options: RegisterOptions,
 ): McpCommand {
   return {
-    command: options.interpreter,
+    command: scope === "project" ? "node" : options.interpreter,
     args: [serverArgFor(options.target, scope)],
     env: {
       TYPEGRAPH_PROJECT_ROOT: scope === "project" ? "." : projectRoot,

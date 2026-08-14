@@ -4,6 +4,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 
 const repoRoot = path.resolve(import.meta.dirname, "..");
+const cli = path.join(repoRoot, "src/cli.cjs");
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "tg-check-project-"));
 
 let failures = 0;
@@ -72,6 +73,21 @@ function runCheck(projectRoot: string, cwd: string): { status: number | null; ou
   };
 }
 
+function runCheckWithCliOptions(
+  projectRoot: string,
+  cwd: string,
+): { status: number | null; output: string } {
+  const env = { ...process.env };
+  delete env["TYPEGRAPH_PROJECT_ROOT"];
+  delete env["TYPEGRAPH_TSCONFIG"];
+  const result = spawnSync(
+    process.execPath,
+    [cli, "check", "--project-root", projectRoot, "--tsconfig", "./tsconfig.json"],
+    { cwd, env, encoding: "utf-8" },
+  );
+  return { status: result.status, output: `${result.stdout}${result.stderr}` };
+}
+
 try {
   console.log("project environment checks");
 
@@ -84,6 +100,18 @@ try {
     "semantic project opens",
     fromOutside.output.includes("[  ok  ] semantic project"),
     fromOutside.output,
+  );
+
+  const explicitCli = runCheckWithCliOptions(goodProject, tempRoot);
+  check(
+    "CLI project/tsconfig options work without environment variables",
+    explicitCli.status === 0,
+    explicitCli.output,
+  );
+  check(
+    "CLI options target the requested project",
+    explicitCli.output.includes(`project: ${goodProject}`) && explicitCli.output.includes("tsconfig.json exists"),
+    explicitCli.output,
   );
 
   const ts5Project = makeProject("ts5", { tsconfig: true, typescript: "ts5-stub" });

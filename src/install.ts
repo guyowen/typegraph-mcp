@@ -287,6 +287,7 @@ export async function setup(projectRoot: string, sourceDir: string, yes: boolean
     sourceDir,
     projectRoot,
     packageRoot: target.packageRoot,
+    tsconfig,
     selectedAgents: selected,
   });
   for (const [name, info] of Object.entries(skills.byTarget)) {

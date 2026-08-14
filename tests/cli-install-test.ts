@@ -262,6 +262,7 @@ fs.mkdirSync(path.join(dep, "dist"), { recursive: true });
 fs.writeFileSync(path.join(dep, "package.json"), JSON.stringify({ name: "typegraph-mcp", version: "0.1.0" }));
 fs.writeFileSync(path.join(dep, "dist/server.cjs"), "// stand-in\n");
 fs.writeFileSync(path.join(dep, "dist/check.cjs"), "// stand-in\n");
+fs.writeFileSync(path.join(dep, "dist/cli.cjs"), "// stand-in\n");
 run("setup", "--yes");
 
 const mcpDep = readJson(".mcp.json");
@@ -286,7 +287,16 @@ check(
   ocDep.mcp?.["typegraph-mcp"]?.command?.[1],
 );
 const skillAfter = fs.readFileSync(path.join(tmp, ".claude/skills/deep-survey/SKILL.md"), "utf-8");
-check("skills re-templated to the installed copy", skillAfter.includes(dep));
+check(
+  "skills re-templated to a relocation-safe installed copy",
+  skillAfter.includes('"node" "./node_modules/typegraph-mcp/dist/cli.cjs" check') &&
+    !skillAfter.includes(tmp),
+);
+check(
+  "skill health check targets the consumer project",
+  skillAfter.includes('--project-root "."') && skillAfter.includes('--tsconfig "./tsconfig.json"'),
+);
+check("project MCP config uses portable node from PATH", mcpDepServer?.command === "node");
 
 console.log("\nremove");
 run("remove");

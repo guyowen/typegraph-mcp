@@ -1,6 +1,6 @@
 {
   "name": "typegraph-mcp",
-  "version": "0.9.54",
+  "version": "0.9.55",
   "description": "Type-aware codebase navigation for AI coding agents — MCP tools powered by tsgo (TypeScript 7) via @effect/tsgo --api + oxc",
   "license": "MIT",
   "type": "module",
@@ -32,7 +32,7 @@
     "prepack": "npm run build",
     "start": "node src/server.cjs",
     "check": "node src/check.cjs",
-    "test": "node tests/agents-test.ts && node tests/skills-install-test.ts && node tests/cli-install-test.ts && node tests/cli-dispatch-test.ts && node tests/navigate-params-test.ts && node tests/invalidation-test.ts && node tests/lsp-client-test.ts && node tests/check-project-test.ts",
+    "test": "node tests/agents-test.ts && node tests/install-paths-test.ts && node tests/skills-install-test.ts && node tests/cli-install-test.ts && node tests/cli-dispatch-test.ts && node tests/navigate-params-test.ts && node tests/invalidation-test.ts && node tests/lsp-client-test.ts && node tests/check-project-test.ts",
     "//test:e2e": "Requires a real TS project: npm run test:e2e -- /path/to/project",
     "test:e2e": "node tests/server-smoke.ts",
     "//test:effect-lsp": "Requires a real Effect project: npm run test:effect-lsp -- /path/to/effect-project [tsconfig]",
