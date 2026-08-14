@@ -4,6 +4,15 @@ import path from "node:path";
 export type PathApi = Pick<typeof path, "relative" | "isAbsolute" | "sep">;
 export type CanonicalizePath = (value: string) => string;
 
+/** Resolve an existing path to its native canonical spelling, or preserve it. */
+export function canonicalPathOrSelf(value: string): string {
+  try {
+    return fs.realpathSync.native(value);
+  } catch {
+    return value;
+  }
+}
+
 function stripWindowsNamespace(value: string, pathApi: PathApi): string {
   if (pathApi.sep !== "\\") return value;
   if (value.startsWith("\\\\?\\UNC\\")) return `\\\\${value.slice(8)}`;

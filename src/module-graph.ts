@@ -11,7 +11,7 @@ import { parseSync } from "oxc-parser";
 import { ResolverFactory } from "oxc-resolver";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { relativePathWithin } from "./path-containment.ts";
+import { canonicalPathOrSelf, relativePathWithin } from "./path-containment.ts";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -488,7 +488,7 @@ export function startWatcher(
   try {
     const normalizedExclusions = normalizeExcludedPaths(projectRoot, excludedPaths);
     const watcher = fs.watch(
-      projectRoot,
+      canonicalPathOrSelf(projectRoot),
       { recursive: true },
       (_eventType: string, filename: string | null) => {
         if (!filename) return;

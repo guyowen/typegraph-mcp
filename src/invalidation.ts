@@ -21,6 +21,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { ApiClient } from "./api-client.ts";
 import type { NavigateTo } from "./navigate-to.ts";
+import { canonicalPathOrSelf } from "./path-containment.ts";
 import type { SemanticService } from "./semantic.ts";
 
 const TS_EXTENSIONS = new Set([".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"]);
@@ -54,7 +55,12 @@ export class Invalidator {
   start(): void {
     if (this.#watcher) return;
     try {
-      this.#watcher = fs.watch(this.projectRoot, { recursive: true }, (_event, filename) => {
+      // Windows recursive watching asserts internally when the root uses an
+      // 8.3 short name (for example RUNNER~1) but events arrive under its long
+      // spelling. Watch the native canonical root while keeping emitted paths
+      // relative to the configured project spelling used by TSGo.
+      const watchRoot = canonicalPathOrSelf(this.projectRoot);
+      this.#watcher = fs.watch(watchRoot, { recursive: true }, (_event, filename) => {
         if (!filename) return;
         if (!TS_EXTENSIONS.has(path.extname(filename))) return;
         if (filename.split(path.sep).some((p) => SKIP_DIRS.has(p))) return;
@@ -70,8 +76,9 @@ export class Invalidator {
       });
       this.#watcher.on("error", () => this.stop());
     } catch {
-      // Watching is an optimization: without it queries still work, they just
-      // see the snapshot as of the last explicit refresh.
+      // Canonicalizing above prevents the uncatchable Windows short/long-path
+      // assertion. Other setup failures are recoverable because watching is an
+      // optimization; queries still see the last explicit snapshot.
       this.#watcher = undefined;
     }
   }
