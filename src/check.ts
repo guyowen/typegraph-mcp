@@ -88,11 +88,6 @@ function collectInstalled(projectRoot: string): InstalledEntry[] {
     }
   }
 
-  // Retired releases wrote Antigravity globally. Keep surfacing a stale entry
-  // until setup/remove has had a chance to clean it.
-  const antigravity = path.join(process.env["HOME"] ?? "", ".gemini/antigravity/mcp_config.json");
-  fromJsonConfig(antigravity, path.dirname(antigravity), "mcpServers", entries);
-
   return entries;
 }
 

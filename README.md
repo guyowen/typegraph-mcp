@@ -233,7 +233,7 @@ statically.
 
 2. **Baked interpreter paths rot.** Every supported config is project-scoped. Committed configs and skills therefore use `node` from PATH instead of an installer-machine nvm/fnm/mise path; the CLI trampoline reports a clear error below Node 22.18, and `typegraph-mcp check` verifies the command actually stored in each config.
 
-3. **Legacy global MCP entries were never removed.** Older releases wrote Antigravity under `~/.gemini/antigravity/mcp_config.json`. Current releases use project `.agents/mcp_config.json`, while setup/remove still clean the retired global entry.
+3. **Legacy global Codex entries were never removed.** The retired plugin installer wrote a project-specific server into `~/.codex/config.toml`. Current releases use project `.codex/config.toml`, while setup/remove still clean an old global entry when it points at this project.
 
 ## Commands
 
