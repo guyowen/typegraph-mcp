@@ -275,6 +275,9 @@ export async function setup(projectRoot: string, sourceDir: string, yes: boolean
       `An absolute setup tsconfig must be inside the project root so generated configs remain portable: ${configuredTsconfig}`,
     );
   }
+  if (fs.existsSync(tsconfigAbs) && !fs.statSync(tsconfigAbs).isFile()) {
+    throw new Error(`The setup tsconfig must name a file, not a directory: ${configuredTsconfig}`);
+  }
   const portableTsconfig = relativeTsconfig.replaceAll("\\", "/");
   const tsconfig = outsideProject ? portableTsconfig : `./${portableTsconfig}`;
 

@@ -201,8 +201,9 @@ check calls the package's project-relative public CLI with explicit
 normalizes an in-project absolute tsconfig to a project-relative path, accepts
 portable relative parent paths used by monorepos, and rejects an absolute path
 outside the project rather than baking an installer-machine location into
-committed files. Moving the checkout does not stale the command, and the
-command assumes neither Git nor POSIX environment syntax.
+committed files. Existing directory paths are rejected as invalid tsconfigs.
+Moving the checkout does not stale the command, and the command assumes neither
+Git nor POSIX environment syntax.
 
 ### Public entry points, no flag
 

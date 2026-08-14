@@ -360,6 +360,39 @@ check(
 );
 fs.rmSync(outsideTsconfig, { force: true });
 
+console.log("\na directory cannot masquerade as a tsconfig");
+const configBeforeDirectory = fs.readFileSync(path.join(tmp, ".mcp.json"), "utf-8");
+const skillBeforeDirectory = fs.readFileSync(
+  path.join(tmp, ".claude/skills/deep-survey/SKILL.md"),
+  "utf-8",
+);
+const directoryRejected = spawnSync(
+  process.execPath,
+  [cli, "setup", "--yes", "--project-root", tmp, "--tsconfig", "."],
+  {
+    cwd: tmp,
+    env: { ...process.env, HOME: fakeHome, USERPROFILE: fakeHome },
+    encoding: "utf-8",
+  },
+);
+const directoryOutput = `${directoryRejected.stdout}${directoryRejected.stderr}`;
+check(
+  "directory tsconfig exits non-zero with a concise error",
+  directoryRejected.status === 1 &&
+    directoryOutput.includes("must name a file") &&
+    !directoryOutput.includes("\n    at "),
+  directoryOutput,
+);
+check(
+  "directory rejection leaves MCP config untouched",
+  fs.readFileSync(path.join(tmp, ".mcp.json"), "utf-8") === configBeforeDirectory,
+);
+check(
+  "directory rejection leaves skills untouched",
+  fs.readFileSync(path.join(tmp, ".claude/skills/deep-survey/SKILL.md"), "utf-8") ===
+    skillBeforeDirectory,
+);
+
 console.log("\nremove");
 run("remove");
 check(".claude/skills cleaned", !fs.existsSync(path.join(tmp, ".claude/skills/tool-selection")));
