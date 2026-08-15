@@ -43,7 +43,7 @@ ask while changing code:
 
 This server drives **tsgo** via `@effect/tsgo` in `--api` mode, with an LSP supplement for editor-style hover, Effect diagnostics/code actions, project-wide local-symbol search, and document symbols. It is built for codebases on TypeScript 7, while still analyzing TypeScript 5 projects through its bundled TSGo compatibility path.
 
-Status: **working end to end.** All 22 MCP tools implemented, verified against a real project on `@effect/tsgo` 0.32.1 / `typescript` 7.0.2. The published package runs compiled `dist/` entrypoints, with no `tsx` runtime dependency. `tsc --noEmit` is clean.
+Status: **working end to end.** All 22 MCP tools implemented, verified against a real project on `@effect/tsgo` 0.36.4 / `typescript` 7.0.2. The published package runs compiled `dist/` entrypoints, with no `tsx` runtime dependency. `tsc --noEmit` is clean.
 
 Installed as skills + an MCP entry per agent. Nothing is copied into your project but SKILL.md files — see [Install model](#install-model-skills--mcp-config-nothing-else).
 

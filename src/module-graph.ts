@@ -12,6 +12,7 @@ import { ResolverFactory } from "oxc-resolver";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { canonicalPathOrSelf, relativePathWithin } from "./path-containment.ts";
+import { readConfig } from "./jsonc.ts";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -69,9 +70,93 @@ function isExcluded(filePath: string, excludedPaths: string[]): boolean {
   );
 }
 
-export function discoverFiles(rootDir: string, excludedPaths: string[] = []): string[] {
+/**
+ * The tsconfig's `exclude`, split by what this walker can actually evaluate.
+ *
+ * SKIP_DIRS covers build noise every project has. Project-specific exclusions —
+ * a vendored dependency, a scratch directory — are knowable only from the
+ * project's own config, which is why they have to be read rather than guessed.
+ */
+interface TsconfigExclusions {
+  /** Absolute paths to prune. */
+  paths: string[];
+  /** Bare directory names to skip anywhere in the tree, from `** /name`. */
+  dirNames: string[];
+  /** Real globs this walker has no matcher for; reported, never half-applied. */
+  unsupported: string[];
+}
+
+const GLOB_CHARS = /[*?]/;
+const ANY_DIR_PATTERN = /^\*\*[/\\]([^/\\*?]+)$/;
+
+/**
+ * TypeScript does not merge `exclude` across `extends` — the nearest config
+ * that defines one wins outright — and resolves its relative paths against the
+ * file that declared it. Both rules are reproduced here.
+ */
+function findExcludeDeclaration(
+  projectRoot: string,
+  tsconfigPath: string
+): { entries: string[]; baseDir: string } | undefined {
+  let current = path.resolve(projectRoot, tsconfigPath);
+  const seen = new Set<string>();
+
+  while (!seen.has(current)) {
+    seen.add(current);
+    const config = readConfig(fs, current);
+    if (!config) return undefined;
+
+    const exclude = config["exclude"];
+    if (Array.isArray(exclude)) {
+      return {
+        entries: exclude.filter((entry): entry is string => typeof entry === "string"),
+        baseDir: path.dirname(current),
+      };
+    }
+
+    // Only relative `extends` is followed; a package-name base would need full
+    // node resolution, and inventing a path there would exclude the wrong tree.
+    const base = config["extends"];
+    if (typeof base !== "string" || !base.startsWith(".")) return undefined;
+    current = path.resolve(path.dirname(current), base);
+    if (path.extname(current) === "") current += ".json";
+  }
+
+  return undefined;
+}
+
+export function resolveTsconfigExclusions(
+  projectRoot: string,
+  tsconfigPath: string
+): TsconfigExclusions {
+  const empty: TsconfigExclusions = { paths: [], dirNames: [], unsupported: [] };
+  const declaration = findExcludeDeclaration(projectRoot, tsconfigPath);
+  if (!declaration) return empty;
+
+  for (const entry of declaration.entries) {
+    const anyDir = ANY_DIR_PATTERN.exec(entry);
+    if (anyDir?.[1]) {
+      empty.dirNames.push(anyDir[1]);
+    } else if (GLOB_CHARS.test(entry)) {
+      empty.unsupported.push(entry);
+    } else {
+      empty.paths.push(path.resolve(declaration.baseDir, entry));
+    }
+  }
+
+  return empty;
+}
+
+export function discoverFiles(
+  rootDir: string,
+  excludedPaths: string[] = [],
+  skipDirNames: readonly string[] = []
+): string[] {
   const files: string[] = [];
   const normalizedExclusions = normalizeExcludedPaths(rootDir, excludedPaths);
+  const skipDirs = skipDirNames.length
+    ? new Set([...SKIP_DIRS, ...skipDirNames])
+    : SKIP_DIRS;
 
   function walk(dir: string): void {
     let entries: fs.Dirent[];
@@ -83,7 +168,7 @@ export function discoverFiles(rootDir: string, excludedPaths: string[] = []): st
 
     for (const entry of entries) {
       if (entry.isDirectory()) {
-        if (SKIP_DIRS.has(entry.name)) continue;
+        if (skipDirs.has(entry.name)) continue;
         // Skip hidden directories (except the root)
         if (entry.name.startsWith(".") && dir !== rootDir) continue;
         const childDir = path.join(dir, entry.name);
@@ -351,7 +436,22 @@ export async function buildGraph(
   const startTime = performance.now();
 
   const resolver = createResolver(projectRoot, tsconfigPath);
-  const fileList = discoverFiles(projectRoot, excludedPaths);
+
+  // The semantic layer gets `exclude` for free by opening the tsconfig as a
+  // program; this walker has to be told. Caller-supplied paths keep this
+  // package's own sources out when it is installed inside the project under
+  // analysis, so the tsconfig adds to that list rather than replacing it.
+  const excluded = resolveTsconfigExclusions(projectRoot, tsconfigPath);
+  if (excluded.unsupported.length > 0) {
+    log(
+      `tsconfig exclude not applied to the module graph (unsupported glob): ${excluded.unsupported.join(", ")}`
+    );
+  }
+  const fileList = discoverFiles(
+    projectRoot,
+    [...excludedPaths, ...excluded.paths],
+    excluded.dirNames
+  );
 
   log(`Discovered ${fileList.length} source files`);
 
